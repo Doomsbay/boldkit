@@ -47,10 +47,14 @@ names_count="$(wc -l < "${taxdump_dir}/names.dmp" | tr -d ' ')"
 taxid_count="$(wc -l < "${taxdump_dir}/taxid.map" | tr -d ' ')"
 
 marker_seq_count="0"
-mapfile -d '' marker_files < <(find "${marker_dir}" -maxdepth 1 -type f -name '*.fasta' -print0)
+# Updated to find .fasta.gz files
+mapfile -d '' marker_files < <(find "${marker_dir}" -maxdepth 1 -type f -name '*.fasta.gz' -print0)
 marker_file_count="${#marker_files[@]}"
+
 if (( marker_file_count > 0 )); then
-  marker_seq_count="$(awk '/^>/{c++} END{print c+0}' "${marker_files[@]}")"
+  # Use zcat to stream content and grep to count headers
+  # xargs ensures we don't hit command line length limits with too many files
+  marker_seq_count="$(find "${marker_dir}" -maxdepth 1 -name '*.fasta.gz' -print0 | xargs -0 zcat | grep -c '^>')"
 fi
 
 cat <<EOF > "${output_file}"
