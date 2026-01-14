@@ -4,7 +4,8 @@ set -euo pipefail
 input_tsv="${1:-BOLD_Public.26-Sep-2025/BOLD_Public.26-Sep-2025.tsv}"
 output_dir="${2:-marker_fastas}"
 
-if [[ -d "${output_dir}" ]] && compgen -G "${output_dir}/*.fasta" > /dev/null; then
+# Updated check to look for .fasta OR .fasta.gz
+if [[ -d "${output_dir}" ]] && (compgen -G "${output_dir}/*.fasta" > /dev/null || compgen -G "${output_dir}/*.fasta.gz" > /dev/null); then
   echo "Marker FASTAs already exist, skipping: ${output_dir}" >&2
   exit 0
 fi
@@ -16,6 +17,7 @@ fi
 
 mkdir -p "${output_dir}"
 
+echo "Parsing BOLD snapshot and writing FASTA files..."
 awk -F'\t' -v OUTDIR="${output_dir}" '
 BEGIN{OFS="\n"}
 NR==1{
@@ -46,3 +48,7 @@ NR==1{
   print ">"$(pid), toupper(seq) >> out;
 }
 ' "${input_tsv}"
+
+# NEW STEP: Compress all generated FASTA files
+echo "Compressing marker FASTA files..."
+gzip "${output_dir}"/*.fasta
