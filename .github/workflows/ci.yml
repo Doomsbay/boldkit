@@ -38,7 +38,7 @@ jobs:
       - name: Run shellcheck on bash scripts
         run: |
           echo "Checking bash scripts..."
-          shellcheck boldkit.sh boldkit/package.sh scripts/*.sh
+          shellcheck --severity=error boldkit.sh boldkit/package.sh scripts/*.sh
 
   validate:
     name: Validate
