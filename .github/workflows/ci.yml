@@ -1,0 +1,151 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - '**'  # Run on all branches for linting
+    tags:
+      - 'v*'  # Run on version tags for releases
+  pull_request:
+    branches:
+      - main  # Run PR checks before merging to main
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=10m
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck on bash scripts
+        run: |
+          echo "Checking bash scripts..."
+          shellcheck boldkit.sh boldkit/package.sh scripts/*.sh
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run go build (quick validation)
+        run: go build -v ./boldkit
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build for Linux amd64
+        run: |
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o boldkit-linux-amd64 ./boldkit
+          echo "Build successful for linux/amd64"
+
+      - name: Test package.sh script
+        run: |
+          chmod +x boldkit/package.sh
+          # Test script syntax
+          bash -n boldkit/package.sh
+          echo "package.sh syntax validated"
+
+      - name: Test boldkit.sh script
+        run: |
+          chmod +x boldkit.sh
+          chmod +x scripts/*.sh
+          # Test script syntax
+          bash -n boldkit.sh
+          for script in scripts/*.sh; do
+            bash -n "$script"
+            echo "Syntax validated for $script"
+          done
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build release artifacts
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }} \
+          PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64" \
+          DIST_DIR=./dist \
+          ./boldkit/package.sh
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
