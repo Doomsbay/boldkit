@@ -131,7 +131,7 @@ jobs:
           VERSION=${{ steps.version.outputs.VERSION }} \
           PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64" \
           DIST_DIR=./dist \
-          ./boldkit/package.sh
+          bash ./boldkit/package.sh
 
       - name: Generate checksums
         run: |
