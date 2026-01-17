@@ -3,7 +3,11 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${root_dir}/.." && pwd)"
+start_dir="$(pwd)"
 dist_dir="${DIST_DIR:-${root_dir}/dist}"
+if [[ "${dist_dir}" != /* ]]; then
+  dist_dir="${start_dir}/${dist_dir}"
+fi
 platforms_raw="${PLATFORMS:-linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64}"
 read -r -a platforms <<< "${platforms_raw}"
 
