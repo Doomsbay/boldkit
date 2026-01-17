@@ -28,23 +28,24 @@ echo "Dist dir: ${dist_dir}"
 for plat in "${platforms[@]}"; do
   GOOS="${plat%%/*}"
   GOARCH="${plat##*/}"
+  os_label="${GOOS}"
   ext=""
   archive_ext="tar.gz"
   if [[ "${GOOS}" == "windows" ]]; then
     ext=".exe"
   fi
+  if [[ "${GOOS}" == "darwin" ]]; then
+    os_label="macos"
+  fi
 
-  out_dir="${tmp_dir}/boldkit_${version}_${GOOS}_${GOARCH}"
-  bin_name="binaries/boldkit${ext}"
-  mkdir -p "${out_dir}/binaries"
+  bin_name="boldkit_${version}_${os_label}_${GOARCH}${ext}"
+  out_path="${tmp_dir}/${bin_name}"
 
   echo "Building ${GOOS}/${GOARCH}..."
-  (cd "${repo_root}" && GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -o "${out_dir}/${bin_name}" ./boldkit)
+  (cd "${repo_root}" && GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -o "${out_path}" ./boldkit)
 
-  cp "${repo_root}/LICENSE" "${out_dir}/"
-
-  archive_name="boldkit_${version}_${GOOS}_${GOARCH}.${archive_ext}"
-  (cd "${tmp_dir}" && tar -czf "${dist_dir}/${archive_name}" "$(basename "${out_dir}")")
+  archive_name="boldkit_${version}_${os_label}_${GOARCH}.${archive_ext}"
+  (cd "${tmp_dir}" && tar -czf "${dist_dir}/${archive_name}" "${bin_name}")
 
 done
 
