@@ -120,7 +120,7 @@ marker_dir="${marker_dir:-${default_marker}}"
 release_dir="${release_dir:-${default_releases}}"
 
 if [[ "${input_tsv}" == *"*"* ]]; then
-  matches=( ${input_tsv} )
+  mapfile -t matches < <(compgen -G "${input_tsv}")
   if (( ${#matches[@]} == 0 )); then
     echo "Input TSV not found: ${input_tsv}" >&2
     exit 1
@@ -188,7 +188,7 @@ run_taxonkit_package() {
   name="${base}"
   if [[ "${base}" == *.* ]]; then
     ext=".${base##*.}"
-    name="${base%${ext}}"
+    name="${base%"${ext}"}"
   fi
   if [[ -n "${dataset_tag}" ]]; then
     name="${name}.${dataset_tag}${ext}"

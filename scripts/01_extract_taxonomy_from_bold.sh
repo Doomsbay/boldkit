@@ -5,7 +5,7 @@ input_tsv="${1:-./BOLD_Public.*/BOLD_Public.*.tsv}"
 output_tsv="${2:-taxonkit_input.tsv}"
 
 if [[ "${input_tsv}" == *"*"* ]]; then
-  matches=( ${input_tsv} )
+  mapfile -t matches < <(compgen -G "${input_tsv}")
   if (( ${#matches[@]} == 0 )); then
     echo "Input TSV not found: ${input_tsv}" >&2
     exit 1

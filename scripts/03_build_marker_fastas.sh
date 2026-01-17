@@ -13,7 +13,7 @@ if [[ -d "${output_dir}" ]] && (compgen -G "${output_dir}/*.fasta" > /dev/null |
 fi
 
 if [[ "${input_tsv}" == *"*"* ]]; then
-  matches=( ${input_tsv} )
+  mapfile -t matches < <(compgen -G "${input_tsv}")
   if (( ${#matches[@]} == 0 )); then
     echo "Input TSV not found: ${input_tsv}" >&2
     exit 1
@@ -35,7 +35,7 @@ mkdir -p "${output_dir}"
 
 spinner_pid=""
 start_time="$(date +%s)"
-spinner_chars='|/-\'
+spinner_chars="|/-\\"
 spinner() {
   local i=0
   while true; do

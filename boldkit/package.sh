@@ -4,7 +4,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${root_dir}/.." && pwd)"
 dist_dir="${DIST_DIR:-${root_dir}/dist}"
-platforms="${PLATFORMS:-linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64}"
+platforms_raw="${PLATFORMS:-linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64}"
+read -r -a platforms <<< "${platforms_raw}"
 
 if [[ -n "${VERSION:-}" ]]; then
   version="${VERSION}"
@@ -21,10 +22,10 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 echo "Packaging BoldKit version: ${version}"
-echo "Platforms: ${platforms}"
+echo "Platforms: ${platforms_raw}"
 echo "Dist dir: ${dist_dir}"
 
-for plat in ${platforms}; do
+for plat in "${platforms[@]}"; do
   GOOS="${plat%%/*}"
   GOARCH="${plat##*/}"
   ext=""
@@ -34,8 +35,8 @@ for plat in ${platforms}; do
   fi
 
   out_dir="${tmp_dir}/boldkit_${version}_${GOOS}_${GOARCH}"
-  bin_name="/binaries/boldkit${ext}"
-  mkdir -p "${out_dir}"
+  bin_name="binaries/boldkit${ext}"
+  mkdir -p "${out_dir}/binaries"
 
   echo "Building ${GOOS}/${GOARCH}..."
   (cd "${repo_root}" && GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -o "${out_dir}/${bin_name}" ./boldkit)
