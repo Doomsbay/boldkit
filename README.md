@@ -42,7 +42,7 @@ Local wiki pages:
 ## Pipeline workflow
 `bolddb-taxdump.sh` runs:
 1) Extract taxonomy to `taxonkit_input.tsv`.
-2) Build taxdump (`nodes.dmp`, `names.dmp`, `taxid.map`).
+2) Build taxdump using taxonkit(`nodes.dmp`, `names.dmp`, `taxid.map`).
 3) Build marker FASTAs (`marker_fastas/*.fasta.gz`).
 4) Package zip archives (when `--package` is set).
 5) Generate `releases/manifest.json` (unless `--skip-manifest`).
