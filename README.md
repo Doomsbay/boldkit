@@ -42,11 +42,11 @@ Note: BOLD snapshots are very large; processing can take a long time.
 If you prefer the Go tools for speed, download or build the BoldKit binary and see the GitHub wiki for commands and parameters. The bash pipeline does not require Go.
 
 Wiki pages:
-- https://github.com/Doomsbay/boldkit/wiki/Download
-- https://github.com/Doomsbay/boldkit/wiki/Quick-Start
-- https://github.com/Doomsbay/boldkit/wiki/Usage
-- https://github.com/Doomsbay/boldkit/wiki/Examples
-- https://github.com/Doomsbay/boldkit/wiki/FAQ
+- [Download](https://github.com/Doomsbay/boldkit/wiki/Download)
+- [Quick Start](https://github.com/Doomsbay/boldkit/wiki/Quick-Start)
+- [Usage](https://github.com/Doomsbay/boldkit/wiki/Usage)
+- [Examples](https://github.com/Doomsbay/boldkit/wiki/Examples)
+- [FAQ](https://github.com/Doomsbay/boldkit/wiki/FAQ)
 
 ## Pipeline workflow
 `bolddb-taxdump.sh` runs:
