@@ -4,6 +4,7 @@
 [![Downloads](https://img.shields.io/github/downloads/Doomsbay/boldkit/total)](https://github.com/Doomsbay/boldkit/releases)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18382196.svg)](https://doi.org/10.5281/zenodo.18382196)
 [![License](https://img.shields.io/github/license/Doomsbay/boldkit)](LICENSE)
+
 Build NCBI-style taxonomy databases and marker-specific FASTA reference sets from BOLD public snapshots.
 
 ## Overview
