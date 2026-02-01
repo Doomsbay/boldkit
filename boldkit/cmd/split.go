@@ -1,10 +1,23 @@
 package cmd
 
 import (
+	"bufio"
+	"crypto/md5"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 )
+
+const unseenClassCutoff = 51
+
+type splitStats struct {
+	TotalRecords  int
+	TotalClasses  int
+	SeenClasses   int
+	UnseenClasses int
+}
 
 func runSplit(args []string) {
 	fs := flag.NewFlagSet("split", flag.ExitOnError)
@@ -46,10 +59,25 @@ func runSplit(args []string) {
 }
 
 func splitOne(input, outDir, taxonkitIn string, ranks []string, taxdumpDir, taxidMap string) error {
-	if _, err := loadProcessLabelMap(taxonkitIn); err != nil {
+	_ = ranks
+	_ = taxdumpDir
+	_ = taxidMap
+
+	labels, err := loadProcessLabelMap(taxonkitIn)
+	if err != nil {
 		return err
 	}
-	return fmt.Errorf("split not implemented yet")
+	assignments, stats, err := buildSplitAssignments(input, labels)
+	if err != nil {
+		return err
+	}
+
+	if err := writeSplitFastas(input, outDir, assignments); err != nil {
+		return err
+	}
+
+	logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses)
+	return nil
 }
 
 func loadProcessLabelMap(path string) (map[string]string, error) {
@@ -104,4 +132,221 @@ func loadProcessLabelMap(path string) (map[string]string, error) {
 		return nil, fmt.Errorf("taxonkit input appears empty: %s", path)
 	}
 	return labels, nil
+}
+
+func buildSplitAssignments(input string, labels map[string]string) (map[string]string, splitStats, error) {
+	in, err := openInput(input)
+	if err != nil {
+		return nil, splitStats{}, fmt.Errorf("open input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	classMembers := make(map[string][]string, 1<<20)
+	seenIDs := make(map[string]struct{}, 1<<20)
+	stats := splitStats{}
+
+	err = parseFasta(in, func(rec fastaRecord) error {
+		if rec.id == "" {
+			return fmt.Errorf("found FASTA record with empty ID")
+		}
+		if _, ok := seenIDs[rec.id]; ok {
+			return fmt.Errorf("duplicate processid in input FASTA: %s", rec.id)
+		}
+		seenIDs[rec.id] = struct{}{}
+
+		label, ok := labels[rec.id]
+		if !ok {
+			return fmt.Errorf("missing species label for processid %s in taxonkit input", rec.id)
+		}
+		classMembers[label] = append(classMembers[label], rec.id)
+		stats.TotalRecords++
+		return nil
+	})
+	if err != nil {
+		return nil, splitStats{}, err
+	}
+	if stats.TotalRecords == 0 {
+		return nil, splitStats{}, fmt.Errorf("input FASTA appears empty: %s", input)
+	}
+
+	assignments := make(map[string]string, len(seenIDs))
+	stats.TotalClasses = len(classMembers)
+
+	for label, ids := range classMembers {
+		if len(ids) == 0 {
+			continue
+		}
+
+		ordered := stablePIDOrder(ids)
+		classUnseen := len(ids) == 1 || classHashByte(label) < unseenClassCutoff
+		if classUnseen {
+			stats.UnseenClasses++
+			testN, valN, keyN := unseenCounts(len(ordered))
+			assignRange(assignments, ordered, 0, testN, "unseen_test")
+			assignRange(assignments, ordered, testN, testN+valN, "unseen_val")
+			assignRange(assignments, ordered, testN+valN, testN+valN+keyN, "unseen_key")
+			continue
+		}
+
+		stats.SeenClasses++
+		trainN, valN, testN := seenCounts(len(ordered))
+		assignRange(assignments, ordered, 0, testN, "seen_test")
+		assignRange(assignments, ordered, testN, testN+valN, "seen_val")
+		assignRange(assignments, ordered, testN+valN, testN+valN+trainN, "seen_train")
+	}
+
+	return assignments, stats, nil
+}
+
+func writeSplitFastas(input, outDir string, assignments map[string]string) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	paths := map[string]string{
+		"seen_train":  filepath.Join(outDir, "seen_train.fasta"),
+		"seen_val":    filepath.Join(outDir, "seen_val.fasta"),
+		"seen_test":   filepath.Join(outDir, "seen_test.fasta"),
+		"unseen_test": filepath.Join(outDir, "unseen_test.fasta"),
+		"unseen_val":  filepath.Join(outDir, "unseen_val.fasta"),
+		"unseen_key":  filepath.Join(outDir, "unseen_key.fasta"),
+	}
+
+	type splitWriter struct {
+		file *os.File
+		buf  *bufio.Writer
+	}
+	writers := make(map[string]splitWriter, len(paths))
+	for key, path := range paths {
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("create %s: %w", path, err)
+		}
+		writers[key] = splitWriter{
+			file: f,
+			buf:  bufio.NewWriterSize(f, writerBufferSize),
+		}
+	}
+	defer func() {
+		for _, w := range writers {
+			_ = w.buf.Flush()
+			_ = w.file.Close()
+		}
+	}()
+
+	in, err := openInput(input)
+	if err != nil {
+		return fmt.Errorf("open input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	return parseFasta(in, func(rec fastaRecord) error {
+		split, ok := assignments[rec.id]
+		if !ok {
+			return fmt.Errorf("missing split assignment for processid %s", rec.id)
+		}
+		w, ok := writers[split]
+		if !ok {
+			return fmt.Errorf("unknown split bucket %s", split)
+		}
+		if err := writeFasta(w.buf, rec.id, rec.seq); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func stablePIDOrder(ids []string) []string {
+	type item struct {
+		id   string
+		hash [16]byte
+	}
+	items := make([]item, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, item{
+			id:   id,
+			hash: md5.Sum([]byte(id)),
+		})
+	}
+	// Order by hash first so splits remain stable as new records are appended.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].hash != items[j].hash {
+			return lessHash(items[i].hash, items[j].hash)
+		}
+		return items[i].id < items[j].id
+	})
+
+	out := make([]string, len(items))
+	for i := range items {
+		out[i] = items[i].id
+	}
+	return out
+}
+
+func lessHash(a, b [16]byte) bool {
+	for i := 0; i < len(a); i++ {
+		if a[i] < b[i] {
+			return true
+		}
+		if a[i] > b[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func classHashByte(label string) byte {
+	sum := md5.Sum([]byte(label))
+	return sum[0]
+}
+
+func seenCounts(n int) (trainN, valN, testN int) {
+	if n < 8 {
+		return n, 0, 0
+	}
+	testN = ceilDiv(2*n, 10)
+	if testN > 25 {
+		testN = 25
+	}
+	remaining := n - testN
+	valN = ceilDiv(remaining, 20)
+	trainN = remaining - valN
+	return trainN, valN, testN
+}
+
+func unseenCounts(n int) (testN, valN, keyN int) {
+	testN = ceilDiv(2*n, 10)
+	if testN > 25 {
+		testN = 25
+	}
+	remaining := n - testN
+	valN = ceilDiv(remaining, 5)
+	keyN = remaining - valN
+	return testN, valN, keyN
+}
+
+func ceilDiv(a, b int) int {
+	if b <= 0 {
+		return 0
+	}
+	if a <= 0 {
+		return 0
+	}
+	return (a + b - 1) / b
+}
+
+func assignRange(assignments map[string]string, ids []string, start, end int, bucket string) {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(ids) {
+		end = len(ids)
+	}
+	for i := start; i < end; i++ {
+		assignments[ids[i]] = bucket
+	}
 }
