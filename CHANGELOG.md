@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - New `qc` command for FASTA filtering (length, ambiguity, invalid chars, dedupe, required taxonomy ranks).
-- New `format` command to generate classifier-ready outputs (BLAST, Kraken2, SINTAX, RDP, IDTAXA, PROTAX, DNA-Sketch).
+- New `format` command to generate classifier-ready outputs (BLAST, Kraken2, SINTAX, RDP, IDTAXA, PROTAX).
 - New `classify` pipeline that chains QC + format with per-classifier output directories.
 - Optional compression of classifier outputs via `-compress`.
 - Approximate progress bars for `qc` and `format`.

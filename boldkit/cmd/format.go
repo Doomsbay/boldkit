@@ -79,7 +79,6 @@ type formatWriters struct {
 	idtaxaLineage writerHandle
 	protaxFasta   writerHandle
 	protaxMap     writerHandle
-	dnaFasta      writerHandle
 }
 
 func formatFasta(cfg formatConfig) error {
@@ -172,12 +171,6 @@ func formatFasta(cfg formatConfig) error {
 		if writers.sintaxFasta.w != nil {
 			header := rec.id + ";tax=" + sintaxLineage(names)
 			if err := writeFasta(writers.sintaxFasta.w, header, seq); err != nil {
-				return err
-			}
-		}
-		if writers.dnaFasta.w != nil {
-			header := rec.id + ";tax=" + sintaxLineage(names)
-			if err := writeFasta(writers.dnaFasta.w, header, seq); err != nil {
 				return err
 			}
 		}
@@ -295,13 +288,6 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 		}
 		w.sintaxFasta = bw
 	}
-	if _, ok := needs["dnasketch"]; ok {
-		bw, err := openFasta("dnasketch.fasta")
-		if err != nil {
-			return nil, err
-		}
-		w.dnaFasta = bw
-	}
 	if _, ok := needs["rdp"]; ok {
 		bw, err := openFasta("rdp_seqs.fasta")
 		if err != nil {
@@ -361,7 +347,6 @@ func closeFormatWriters(w *formatWriters) {
 	flush(w.idtaxaLineage)
 	flush(w.protaxFasta)
 	flush(w.protaxMap)
-	flush(w.dnaFasta)
 }
 
 func writeFasta(w *bufio.Writer, header string, seq []byte) error {
@@ -388,6 +373,21 @@ func buildLineage(lineage map[string]string, ranks []string) []string {
 			return nil
 		}
 		out = append(out, sanitizeTaxon(name))
+	}
+	return out
+}
+
+func buildLineageRaw(lineage map[string]string, ranks []string) []string {
+	if len(ranks) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ranks))
+	for _, rank := range ranks {
+		name := lineage[rank]
+		if name == "" {
+			return nil
+		}
+		out = append(out, name)
 	}
 	return out
 }
