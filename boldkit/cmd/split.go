@@ -46,5 +46,62 @@ func runSplit(args []string) {
 }
 
 func splitOne(input, outDir, taxonkitIn string, ranks []string, taxdumpDir, taxidMap string) error {
+	if _, err := loadProcessLabelMap(taxonkitIn); err != nil {
+		return err
+	}
 	return fmt.Errorf("split not implemented yet")
+}
+
+func loadProcessLabelMap(path string) (map[string]string, error) {
+	in, err := openInput(path)
+	if err != nil {
+		return nil, fmt.Errorf("open taxonkit input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	opts := DefaultOptions()
+	headerSeen := false
+	idxProcess := -1
+	idxSpecies := -1
+	labels := make(map[string]string, 1<<20)
+
+	err = ParseTSV(in, opts, func(row Row) error {
+		if !headerSeen {
+			headerSeen = true
+			idxProcess = indexOfBytes(row.Fields, "processid")
+			idxSpecies = indexOfBytes(row.Fields, "species")
+			if idxProcess < 0 || idxSpecies < 0 {
+				return fmt.Errorf("required headers missing in taxonkit input (need processid, species)")
+			}
+			return nil
+		}
+
+		if idxProcess >= len(row.Fields) || idxSpecies >= len(row.Fields) {
+			return fmt.Errorf("line %d: expected at least %d fields", row.Line, maxIndex(idxProcess, idxSpecies)+1)
+		}
+
+		pid := string(row.Fields[idxProcess])
+		if pid == "" {
+			return fmt.Errorf("line %d: empty processid", row.Line)
+		}
+		if isNone(row.Fields[idxSpecies]) || len(row.Fields[idxSpecies]) == 0 {
+			return fmt.Errorf("line %d: empty species label for processid %s", row.Line, pid)
+		}
+		label := string(row.Fields[idxSpecies])
+		if prev, ok := labels[pid]; ok && prev != label {
+			return fmt.Errorf("line %d: processid %s maps to multiple labels (%s, %s)", row.Line, pid, prev, label)
+		}
+		labels[pid] = label
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(labels) == 0 {
+		return nil, fmt.Errorf("taxonkit input appears empty: %s", path)
+	}
+	return labels, nil
 }
