@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 )
 
 const unseenClassCutoff = 51
@@ -60,8 +61,6 @@ func runSplit(args []string) {
 
 func splitOne(input, outDir, taxonkitIn string, ranks []string, taxdumpDir, taxidMap string) error {
 	_ = ranks
-	_ = taxdumpDir
-	_ = taxidMap
 
 	labels, err := loadProcessLabelMap(taxonkitIn)
 	if err != nil {
@@ -75,8 +74,13 @@ func splitOne(input, outDir, taxonkitIn string, ranks []string, taxdumpDir, taxi
 	if err := writeSplitFastas(input, outDir, assignments); err != nil {
 		return err
 	}
+	prunedDir, keptTaxids, err := pruneTaxdumpForSeenTrain(assignments, taxdumpDir, taxidMap, outDir)
+	if err != nil {
+		return err
+	}
 
 	logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses)
+	logf("split: pruned taxdump -> %s (kept_taxids=%d)", prunedDir, keptTaxids)
 	return nil
 }
 
@@ -349,4 +353,165 @@ func assignRange(assignments map[string]string, ids []string, start, end int, bu
 	for i := start; i < end; i++ {
 		assignments[ids[i]] = bucket
 	}
+}
+
+func pruneTaxdumpForSeenTrain(assignments map[string]string, taxdumpDir, taxidMapPath, outDir string) (string, int, error) {
+	seenTrainIDs := make(map[string]struct{})
+	for pid, bucket := range assignments {
+		if bucket == "seen_train" {
+			seenTrainIDs[pid] = struct{}{}
+		}
+	}
+	if len(seenTrainIDs) == 0 {
+		return "", 0, fmt.Errorf("no seen_train sequences found; cannot prune taxdump")
+	}
+
+	if taxidMapPath == "" {
+		taxidMapPath = filepath.Join(taxdumpDir, "taxid.map")
+	}
+	pidToTaxid, err := loadTaxidMap(taxidMapPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	nodesPath := filepath.Join(taxdumpDir, "nodes.dmp")
+	namesPath := filepath.Join(taxdumpDir, "names.dmp")
+	dump, err := loadTaxDump(nodesPath, namesPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	keep := make(map[int]struct{}, len(seenTrainIDs)*2)
+	seenTrainTaxids := make(map[string]int, len(seenTrainIDs))
+	for pid := range seenTrainIDs {
+		taxid, ok := pidToTaxid[pid]
+		if !ok {
+			return "", 0, fmt.Errorf("taxid not found for seen_train processid %s", pid)
+		}
+		seenTrainTaxids[pid] = taxid
+
+		cur := taxid
+		for depth := 0; depth < 128 && cur > 0; depth++ {
+			if _, done := keep[cur]; done {
+				break
+			}
+			keep[cur] = struct{}{}
+			node, ok := dump.nodes[cur]
+			if !ok {
+				break
+			}
+			if node.parent == cur || node.parent <= 0 {
+				break
+			}
+			cur = node.parent
+		}
+	}
+
+	prunedDir := filepath.Join(outDir, "taxdump_pruned")
+	if err := os.MkdirAll(prunedDir, 0o755); err != nil {
+		return "", 0, fmt.Errorf("create pruned taxdump dir: %w", err)
+	}
+
+	if err := writePrunedNodes(filepath.Join(prunedDir, "nodes.dmp"), dump.nodes, keep); err != nil {
+		return "", 0, err
+	}
+	if err := writePrunedNames(filepath.Join(prunedDir, "names.dmp"), dump.nodes, keep); err != nil {
+		return "", 0, err
+	}
+	if err := writePrunedTaxidMap(filepath.Join(prunedDir, "taxid.map"), seenTrainTaxids); err != nil {
+		return "", 0, err
+	}
+
+	return prunedDir, len(keep), nil
+}
+
+func writePrunedNodes(path string, nodes map[int]taxNode, keep map[int]struct{}) error {
+	ids := sortedIntSet(keep)
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create nodes.dmp: %w", err)
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+
+	w := bufio.NewWriterSize(f, writerBufferSize)
+	defer func() {
+		_ = w.Flush()
+	}()
+
+	for _, id := range ids {
+		node, ok := nodes[id]
+		if !ok {
+			continue
+		}
+		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + strconv.Itoa(node.parent) + "\t|\t" + node.rank + "\t|\n"); err != nil {
+			return fmt.Errorf("write nodes.dmp: %w", err)
+		}
+	}
+	return nil
+}
+
+func writePrunedNames(path string, nodes map[int]taxNode, keep map[int]struct{}) error {
+	ids := sortedIntSet(keep)
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create names.dmp: %w", err)
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+
+	w := bufio.NewWriterSize(f, writerBufferSize)
+	defer func() {
+		_ = w.Flush()
+	}()
+
+	for _, id := range ids {
+		node, ok := nodes[id]
+		if !ok || node.name == "" {
+			continue
+		}
+		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + node.name + "\t|\t\t|\tscientific name\t|\n"); err != nil {
+			return fmt.Errorf("write names.dmp: %w", err)
+		}
+	}
+	return nil
+}
+
+func writePrunedTaxidMap(path string, pidTaxid map[string]int) error {
+	pids := make([]string, 0, len(pidTaxid))
+	for pid := range pidTaxid {
+		pids = append(pids, pid)
+	}
+	sort.Strings(pids)
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create taxid.map: %w", err)
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+
+	w := bufio.NewWriterSize(f, writerBufferSize)
+	defer func() {
+		_ = w.Flush()
+	}()
+
+	for _, pid := range pids {
+		if _, err := w.WriteString(pid + "\t" + strconv.Itoa(pidTaxid[pid]) + "\n"); err != nil {
+			return fmt.Errorf("write taxid.map: %w", err)
+		}
+	}
+	return nil
+}
+
+func sortedIntSet(values map[int]struct{}) []int {
+	out := make([]int, 0, len(values))
+	for v := range values {
+		out = append(out, v)
+	}
+	sort.Ints(out)
+	return out
 }
