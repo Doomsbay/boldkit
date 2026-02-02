@@ -26,15 +26,21 @@ func runSplit(args []string) {
 	outDir := fs.String("outdir", "splits", "Output directory")
 	markerDir := fs.String("marker-dir", "marker_fastas", "Marker FASTA directory (used when -input is empty)")
 	markers := fs.String("markers", "COI-5P", "Comma-separated markers to process (used when -input is empty)")
+	classifiers := fs.String("classifier", "blast,kraken2,sintax", "Comma-separated classifiers for final reference formatting")
 	taxdumpDir := fs.String("taxdump-dir", "bold-taxdump", "Taxdump directory with nodes.dmp/names.dmp/taxid.map")
 	taxidMap := fs.String("taxid-map", "", "Optional taxid.map override")
 	taxonkitIn := fs.String("taxonkit-input", "taxonkit_input.tsv", "Taxonkit TSV with processid/species labels")
 	requireRanks := fs.String("require-ranks", "kingdom,phylum,class,order,family,genus,species", "Comma-separated ranks required to keep a sequence (empty disables)")
+	formatProgress := fs.Bool("format-progress", true, "Show format progress bar (approximate)")
 	if err := fs.Parse(args); err != nil {
 		fatalf("parse args failed: %v", err)
 	}
 
 	ranks := splitList(*requireRanks)
+	classifierList := splitList(*classifiers)
+	if len(classifierList) == 0 {
+		fatalf("classifier must not be empty")
+	}
 
 	if *input == "" {
 		markerList := splitList(*markers)
@@ -47,20 +53,19 @@ func runSplit(args []string) {
 				fatalf("marker %s: %v", marker, err)
 			}
 			baseOut := filepath.Join(*outDir, safeTag(marker))
-			if err := splitOne(markerInput, baseOut, *taxonkitIn, ranks, *taxdumpDir, *taxidMap); err != nil {
+			if err := splitOne(markerInput, baseOut, *taxonkitIn, ranks, classifierList, *taxdumpDir, *taxidMap, *formatProgress); err != nil {
 				fatalf("split %s failed: %v", marker, err)
 			}
 		}
 		return
 	}
 
-	if err := splitOne(*input, *outDir, *taxonkitIn, ranks, *taxdumpDir, *taxidMap); err != nil {
+	if err := splitOne(*input, *outDir, *taxonkitIn, ranks, classifierList, *taxdumpDir, *taxidMap, *formatProgress); err != nil {
 		fatalf("split failed: %v", err)
 	}
 }
 
-func splitOne(input, outDir, taxonkitIn string, ranks []string, taxdumpDir, taxidMap string) error {
-	_ = ranks
+func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, taxdumpDir, taxidMap string, formatProgress bool) error {
 
 	labels, err := loadProcessLabelMap(taxonkitIn)
 	if err != nil {
@@ -77,6 +82,21 @@ func splitOne(input, outDir, taxonkitIn string, ranks []string, taxdumpDir, taxi
 	prunedDir, keptTaxids, err := pruneTaxdumpForSeenTrain(assignments, taxdumpDir, taxidMap, outDir)
 	if err != nil {
 		return err
+	}
+
+	seenTrain := filepath.Join(outDir, "seen_train.fasta")
+	formatOut := filepath.Join(outDir, "formatted")
+	logf("split: format references from %s -> %s", seenTrain, formatOut)
+	if err := formatFasta(formatConfig{
+		Classifiers:  classifiers,
+		RequireRanks: ranks,
+		Input:        seenTrain,
+		OutDir:       formatOut,
+		TaxdumpDir:   prunedDir,
+		TaxidMapPath: filepath.Join(prunedDir, "taxid.map"),
+		Progress:     formatProgress,
+	}); err != nil {
+		return fmt.Errorf("format references: %w", err)
 	}
 
 	logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses)
