@@ -66,12 +66,12 @@ type extractCurator interface {
 	Close() error
 }
 
-func newExtractCurator(cfg extractCurationConfig) (extractCurator, error) {
+func newExtractCurator(cfg extractCurationConfig, inputPath string) (extractCurator, error) {
 	switch cfg.Protocol {
 	case extractCurationProtocolNone:
 		return &noopExtractCurator{}, nil
 	case extractCurationProtocolBioscan5M:
-		return newExtractBioscan5MCurator(cfg), nil
+		return newExtractBioscan5MCurator(cfg, inputPath)
 	default:
 		return nil, fmt.Errorf("unsupported extraction curation protocol %q", cfg.Protocol)
 	}

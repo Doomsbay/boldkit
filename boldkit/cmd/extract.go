@@ -66,7 +66,7 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 	defer func() {
 		_ = in.Close()
 	}()
-	curator, err := newExtractCurator(curationCfg)
+	curator, err := newExtractCurator(curationCfg, inputPath)
 	if err != nil {
 		return 0, fmt.Errorf("create curation profile: %w", err)
 	}
@@ -142,10 +142,12 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 
 		if record.Genus != "" && record.Species == "" {
 			suffix := record.BinURI
-			if suffix == "" {
+			if suffix == "" && !curationCfg.enabled() {
 				suffix = record.ProcessID
 			}
-			record.Species = record.Genus + " sp. " + suffix
+			if suffix != "" {
+				record.Species = record.Genus + " sp. " + suffix
+			}
 		}
 
 		line := strings.Join([]string{
