@@ -8,10 +8,10 @@
 Build NCBI-style taxonomy databases and marker-specific FASTA reference sets from BOLD public snapshots.
 
 ## Overview
-- Converts BOLD TSV snapshots into `nodes.dmp`, `names.dmp`, `taxid.map`, and marker FASTAs (COI-5P, ITS, 16S, etc.).
-- Outputs are ready for Kraken2, Centrifuge, Kaiju, DIAMOND+MEGAN, MMseqs2, and similar classifiers.
-- Supports packaging release archives with manifest and checksums.
-- Prebuilt `boldkit` Go executables are provided in releases for faster processing.
+- Build `taxonkit_input.tsv`, `nodes.dmp`, `names.dmp`, `taxid.map`, and per-marker FASTAs from BOLD snapshots.
+- Run classifier preparation workflows (`qc`, `format`, `classify`, `split`) for benchmark-ready reference libraries.
+- Package outputs into release artifacts with checksums and manifest metadata.
+- For full command/flag details, use the wiki ([Usage](https://github.com/Doomsbay/boldkit/wiki/Usage)).
 
 ## Requirements
 - Bash, awk (gawk)
@@ -58,6 +58,18 @@ Wiki pages:
 6) Generate `releases/SHA256SUMS.txt` (unless `--skip-checksums`).
 
 Manual equivalents live in `scripts/01`–`06`.
+
+## Open/closed-world library workflow
+Use `boldkit split` to run QC, open/closed-world partitioning, taxdump pruning, and classifier library formatting.
+
+```bash
+./bin/boldkit split \
+  -marker-dir marker_fastas \
+  -markers COI-5P \
+  -outdir libraries
+```
+
+See wiki [Usage](https://github.com/Doomsbay/boldkit/wiki/Usage) for full split flags, output layout, and workflow variants.
 
 ## Output graph
 ```

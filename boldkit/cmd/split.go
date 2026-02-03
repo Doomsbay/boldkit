@@ -12,26 +12,38 @@ import (
 	"strconv"
 )
 
-const unseenClassCutoff = 51
+const (
+	bucketSeenTrain  = "seen_train"
+	bucketSeenVal    = "seen_val"
+	bucketSeenTest   = "seen_test"
+	bucketUnseenTest = "test_unseen"
+	bucketUnseenVal  = "val_unseen"
+	bucketUnseenKeys = "keys_unseen"
+	bucketHeldout    = "other_heldout"
+	bucketPretrain   = "pretrain"
+)
 
 type splitStats struct {
 	TotalRecords     int `json:"total_records"`
 	TotalClasses     int `json:"total_classes"`
 	SeenClasses      int `json:"seen_classes"`
 	UnseenClasses    int `json:"unseen_classes"`
+	HeldoutClasses   int `json:"heldout_classes"`
 	SeenTrainRecords int `json:"seen_train_records"`
 	SeenValRecords   int `json:"seen_val_records"`
 	SeenTestRecords  int `json:"seen_test_records"`
-	UnseenTest       int `json:"unseen_test_records"`
-	UnseenVal        int `json:"unseen_val_records"`
-	UnseenKey        int `json:"unseen_key_records"`
+	UnseenTest       int `json:"test_unseen_records"`
+	UnseenVal        int `json:"val_unseen_records"`
+	UnseenKey        int `json:"keys_unseen_records"`
+	HeldoutRecords   int `json:"other_heldout_records"`
+	PretrainRecords  int `json:"pretrain_records"`
 }
 
 type splitReport struct {
-	Input       string     `json:"input"`
-	OutDir      string     `json:"out_dir"`
-	Classifiers []string   `json:"classifiers"`
-	PrunedTaxa  int        `json:"pruned_taxids"`
+	Input       string    `json:"input"`
+	OutDir      string    `json:"out_dir"`
+	Classifiers []string  `json:"classifiers"`
+	PrunedTaxa  int       `json:"pruned_taxids"`
 	Stats       splitStats `json:"stats"`
 }
 
@@ -47,10 +59,32 @@ type splitQCConfig struct {
 	Progress   bool
 }
 
+type barcodeUnit struct {
+	hash  [16]byte
+	count int
+}
+
+type barcodeGroup struct {
+	label    string
+	count    int
+	conflict bool
+}
+
+type splitPlan struct {
+	seqBucket  map[[16]byte]string
+	conflicted map[[16]byte]struct{}
+	invalidIDs map[string]struct{}
+}
+
+type splitTarget struct {
+	bucket string
+	target int
+}
+
 func runSplit(args []string) {
 	fs := flag.NewFlagSet("split", flag.ExitOnError)
 	input := fs.String("input", "", "Input FASTA/FASTA.gz")
-	outDir := fs.String("outdir", "splits", "Output directory")
+	outDir := fs.String("outdir", "libraries", "Output directory")
 	markerDir := fs.String("marker-dir", "marker_fastas", "Marker FASTA directory (used when -input is empty)")
 	markers := fs.String("markers", "COI-5P", "Comma-separated markers to process (used when -input is empty)")
 	classifiers := fs.String("classifier", "blast,kraken2,sintax", "Comma-separated classifiers for final reference formatting")
@@ -136,19 +170,34 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 		splitInput = qcOut
 	}
 
-	labels, err := loadProcessLabelMap(taxonkitIn)
+	fastaIDs, err := collectFastaIDs(splitInput)
 	if err != nil {
 		return err
 	}
-	assignments, stats, err := buildSplitAssignments(splitInput, labels)
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkitIn, fastaIDs)
 	if err != nil {
 		return err
 	}
 
-	if err := writeSplitFastas(splitInput, outDir, assignments); err != nil {
+	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs)
+	if err != nil {
 		return err
 	}
-	prunedDir, keptTaxids, err := pruneTaxdumpForSeenTrain(assignments, taxdumpDir, taxidMap, outDir)
+
+	writeStats, seenTrainIDs, err := writeSplitFastas(splitInput, outDir, plan, labels)
+	if err != nil {
+		return err
+	}
+	stats.SeenTrainRecords = writeStats[bucketSeenTrain]
+	stats.SeenValRecords = writeStats[bucketSeenVal]
+	stats.SeenTestRecords = writeStats[bucketSeenTest]
+	stats.UnseenTest = writeStats[bucketUnseenTest]
+	stats.UnseenVal = writeStats[bucketUnseenVal]
+	stats.UnseenKey = writeStats[bucketUnseenKeys]
+	stats.HeldoutRecords = writeStats[bucketHeldout]
+	stats.PretrainRecords = writeStats[bucketPretrain]
+
+	prunedDir, keptTaxids, err := pruneTaxdumpForSeenTrain(seenTrainIDs, taxdumpDir, taxidMap, outDir)
 	if err != nil {
 		return err
 	}
@@ -168,7 +217,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 		return fmt.Errorf("format references: %w", err)
 	}
 
-	logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses)
+	logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d heldout-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses, stats.HeldoutClasses)
 	logf("split: pruned taxdump -> %s (kept_taxids=%d)", prunedDir, keptTaxids)
 	reportPath := filepath.Join(outDir, "split_report.json")
 	if err := writeSplitReport(reportPath, splitReport{
@@ -184,10 +233,39 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 	return nil
 }
 
-func loadProcessLabelMap(path string) (map[string]string, error) {
+func collectFastaIDs(input string) (map[string]struct{}, error) {
+	in, err := openInput(input)
+	if err != nil {
+		return nil, fmt.Errorf("open input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	ids := make(map[string]struct{}, 1<<20)
+	err = parseFasta(in, func(rec fastaRecord) error {
+		if rec.id == "" {
+			return fmt.Errorf("found FASTA record with empty ID")
+		}
+		if _, dup := ids[rec.id]; dup {
+			return fmt.Errorf("duplicate processid in input FASTA: %s", rec.id)
+		}
+		ids[rec.id] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("input FASTA appears empty: %s", input)
+	}
+	return ids, nil
+}
+
+func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string]string, map[string]struct{}, error) {
 	in, err := openInput(path)
 	if err != nil {
-		return nil, fmt.Errorf("open taxonkit input: %w", err)
+		return nil, nil, fmt.Errorf("open taxonkit input: %w", err)
 	}
 	defer func() {
 		_ = in.Close()
@@ -197,7 +275,9 @@ func loadProcessLabelMap(path string) (map[string]string, error) {
 	headerSeen := false
 	idxProcess := -1
 	idxSpecies := -1
-	labels := make(map[string]string, 1<<20)
+	labels := make(map[string]string, len(wantedIDs))
+	invalid := make(map[string]struct{})
+	found := 0
 
 	err = ParseTSV(in, opts, func(row Row) error {
 		if !headerSeen {
@@ -218,105 +298,181 @@ func loadProcessLabelMap(path string) (map[string]string, error) {
 		if pid == "" {
 			return fmt.Errorf("line %d: empty processid", row.Line)
 		}
+		if _, need := wantedIDs[pid]; !need {
+			return nil
+		}
+
 		if isNone(row.Fields[idxSpecies]) || len(row.Fields[idxSpecies]) == 0 {
-			return fmt.Errorf("line %d: empty species label for processid %s", row.Line, pid)
+			invalid[pid] = struct{}{}
+			return nil
 		}
 		label := string(row.Fields[idxSpecies])
 		if prev, ok := labels[pid]; ok && prev != label {
 			return fmt.Errorf("line %d: processid %s maps to multiple labels (%s, %s)", row.Line, pid, prev, label)
 		}
 		labels[pid] = label
+		found++
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if len(labels) == 0 {
-		return nil, fmt.Errorf("taxonkit input appears empty: %s", path)
+	for pid := range wantedIDs {
+		if _, ok := labels[pid]; ok {
+			continue
+		}
+		if _, bad := invalid[pid]; bad {
+			continue
+		}
+		invalid[pid] = struct{}{}
 	}
-	return labels, nil
+	if found == 0 {
+		return nil, nil, fmt.Errorf("taxonkit input has no matching process IDs for input FASTA: %s", path)
+	}
+	if len(invalid) > 0 {
+		logf("split: %d records missing species label (moved to %s)", len(invalid), bucketPretrain)
+	}
+	return labels, invalid, nil
 }
 
-func buildSplitAssignments(input string, labels map[string]string) (map[string]string, splitStats, error) {
+func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}) (splitPlan, splitStats, error) {
 	in, err := openInput(input)
 	if err != nil {
-		return nil, splitStats{}, fmt.Errorf("open input: %w", err)
+		return splitPlan{}, splitStats{}, fmt.Errorf("open input: %w", err)
 	}
 	defer func() {
 		_ = in.Close()
 	}()
 
-	classMembers := make(map[string][]string, 1<<20)
-	seenIDs := make(map[string]struct{}, 1<<20)
+	barcodeGroups := make(map[[16]byte]barcodeGroup, 1<<20)
 	stats := splitStats{}
 
 	err = parseFasta(in, func(rec fastaRecord) error {
-		if rec.id == "" {
-			return fmt.Errorf("found FASTA record with empty ID")
+		stats.TotalRecords++
+		if _, bad := invalidIDs[rec.id]; bad {
+			return nil
 		}
-		if _, ok := seenIDs[rec.id]; ok {
-			return fmt.Errorf("duplicate processid in input FASTA: %s", rec.id)
-		}
-		seenIDs[rec.id] = struct{}{}
-
 		label, ok := labels[rec.id]
 		if !ok {
-			return fmt.Errorf("missing species label for processid %s in taxonkit input", rec.id)
+			invalidIDs[rec.id] = struct{}{}
+			return nil
 		}
-		classMembers[label] = append(classMembers[label], rec.id)
-		stats.TotalRecords++
+
+		hash := md5.Sum(rec.seq)
+		group := barcodeGroups[hash]
+		if group.count == 0 {
+			group.label = label
+		} else if group.label != label {
+			group.conflict = true
+		}
+		group.count++
+		barcodeGroups[hash] = group
 		return nil
 	})
 	if err != nil {
-		return nil, splitStats{}, err
-	}
-	if stats.TotalRecords == 0 {
-		return nil, splitStats{}, fmt.Errorf("input FASTA appears empty: %s", input)
+		return splitPlan{}, splitStats{}, err
 	}
 
-	assignments := make(map[string]string, len(seenIDs))
-	stats.TotalClasses = len(classMembers)
+	seqBucket := make(map[[16]byte]string, len(barcodeGroups))
+	conflicted := make(map[[16]byte]struct{})
+	speciesUnits := make(map[string][]barcodeUnit)
+	speciesCounts := make(map[string]int)
 
-	for label, ids := range classMembers {
-		if len(ids) == 0 {
+	for hash, group := range barcodeGroups {
+		if group.conflict {
+			conflicted[hash] = struct{}{}
+			continue
+		}
+		speciesUnits[group.label] = append(speciesUnits[group.label], barcodeUnit{hash: hash, count: group.count})
+		speciesCounts[group.label] += group.count
+	}
+
+	stats.TotalClasses = len(speciesUnits)
+	for label, units := range speciesUnits {
+		total := speciesCounts[label]
+		uniqueBarcodes := len(units)
+		sort.Slice(units, func(i, j int) bool {
+			return lessHash(units[i].hash, units[j].hash)
+		})
+
+		if total >= 8 && uniqueBarcodes >= 2 {
+			stats.SeenClasses++
+			testTarget := minInt(25, ceilDiv(2*total, 10))
+			valTarget := ceilDiv(total-testTarget, 20)
+			assignUnits(seqBucket, units, []splitTarget{
+				{bucket: bucketSeenTest, target: testTarget},
+				{bucket: bucketSeenVal, target: valTarget},
+				{bucket: bucketSeenTrain, target: -1},
+			})
 			continue
 		}
 
-		ordered := stablePIDOrder(ids)
-		classUnseen := len(ids) == 1 || classHashByte(label) < unseenClassCutoff
-		if classUnseen {
+		if classHashByte(label) < 128 {
 			stats.UnseenClasses++
-			testN, valN, keyN := unseenCounts(len(ordered))
-			assignRange(assignments, ordered, 0, testN, "unseen_test")
-			assignRange(assignments, ordered, testN, testN+valN, "unseen_val")
-			assignRange(assignments, ordered, testN+valN, testN+valN+keyN, "unseen_key")
+			testTarget := minInt(25, ceilDiv(2*total, 10))
+			valTarget := ceilDiv(total-testTarget, 5)
+			assignUnits(seqBucket, units, []splitTarget{
+				{bucket: bucketUnseenTest, target: testTarget},
+				{bucket: bucketUnseenVal, target: valTarget},
+				{bucket: bucketUnseenKeys, target: -1},
+			})
 			continue
 		}
 
-		stats.SeenClasses++
-		trainN, valN, testN := seenCounts(len(ordered))
-		assignRange(assignments, ordered, 0, testN, "seen_test")
-		assignRange(assignments, ordered, testN, testN+valN, "seen_val")
-		assignRange(assignments, ordered, testN+valN, testN+valN+trainN, "seen_train")
+		stats.HeldoutClasses++
+		for _, unit := range units {
+			seqBucket[unit.hash] = bucketHeldout
+		}
 	}
-	countBuckets(assignments, &stats)
 
-	return assignments, stats, nil
+	if len(conflicted) > 0 {
+		logf("split: %d barcode groups span multiple species labels (moved to %s)", len(conflicted), bucketPretrain)
+	}
+
+	return splitPlan{
+		seqBucket:  seqBucket,
+		conflicted: conflicted,
+		invalidIDs: invalidIDs,
+	}, stats, nil
 }
 
-func writeSplitFastas(input, outDir string, assignments map[string]string) error {
+func assignUnits(seqBucket map[[16]byte]string, units []barcodeUnit, targets []splitTarget) {
+	idx := 0
+	for _, t := range targets {
+		if idx >= len(units) {
+			return
+		}
+		if t.target < 0 {
+			for idx < len(units) {
+				seqBucket[units[idx].hash] = t.bucket
+				idx++
+			}
+			return
+		}
+		acc := 0
+		for idx < len(units) && acc < t.target {
+			seqBucket[units[idx].hash] = t.bucket
+			acc += units[idx].count
+			idx++
+		}
+	}
+}
+
+func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]string) (map[string]int, map[string]struct{}, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("create output dir: %w", err)
+		return nil, nil, fmt.Errorf("create output dir: %w", err)
 	}
 
 	paths := map[string]string{
-		"seen_train":  filepath.Join(outDir, "seen_train.fasta"),
-		"seen_val":    filepath.Join(outDir, "seen_val.fasta"),
-		"seen_test":   filepath.Join(outDir, "seen_test.fasta"),
-		"unseen_test": filepath.Join(outDir, "unseen_test.fasta"),
-		"unseen_val":  filepath.Join(outDir, "unseen_val.fasta"),
-		"unseen_key":  filepath.Join(outDir, "unseen_key.fasta"),
+		bucketSeenTrain:  filepath.Join(outDir, "seen_train.fasta"),
+		bucketSeenVal:    filepath.Join(outDir, "seen_val.fasta"),
+		bucketSeenTest:   filepath.Join(outDir, "seen_test.fasta"),
+		bucketUnseenTest: filepath.Join(outDir, "test_unseen.fasta"),
+		bucketUnseenVal:  filepath.Join(outDir, "val_unseen.fasta"),
+		bucketUnseenKeys: filepath.Join(outDir, "keys_unseen.fasta"),
+		bucketHeldout:    filepath.Join(outDir, "other_heldout.fasta"),
+		bucketPretrain:   filepath.Join(outDir, "pretrain.fasta"),
 	}
 
 	type splitWriter struct {
@@ -327,7 +483,7 @@ func writeSplitFastas(input, outDir string, assignments map[string]string) error
 	for key, path := range paths {
 		f, err := os.Create(path)
 		if err != nil {
-			return fmt.Errorf("create %s: %w", path, err)
+			return nil, nil, fmt.Errorf("create %s: %w", path, err)
 		}
 		writers[key] = splitWriter{
 			file: f,
@@ -343,53 +499,45 @@ func writeSplitFastas(input, outDir string, assignments map[string]string) error
 
 	in, err := openInput(input)
 	if err != nil {
-		return fmt.Errorf("open input: %w", err)
+		return nil, nil, fmt.Errorf("open input: %w", err)
 	}
 	defer func() {
 		_ = in.Close()
 	}()
 
-	return parseFasta(in, func(rec fastaRecord) error {
-		split, ok := assignments[rec.id]
-		if !ok {
-			return fmt.Errorf("missing split assignment for processid %s", rec.id)
+	counts := make(map[string]int)
+	seenTrainIDs := make(map[string]struct{})
+	err = parseFasta(in, func(rec fastaRecord) error {
+		bucket := bucketPretrain
+		if _, bad := plan.invalidIDs[rec.id]; !bad {
+			if _, ok := labels[rec.id]; ok {
+				hash := md5.Sum(rec.seq)
+				if _, conflict := plan.conflicted[hash]; !conflict {
+					if mapped, ok := plan.seqBucket[hash]; ok {
+						bucket = mapped
+					}
+				}
+			}
 		}
-		w, ok := writers[split]
+
+		w, ok := writers[bucket]
 		if !ok {
-			return fmt.Errorf("unknown split bucket %s", split)
+			return fmt.Errorf("unknown split bucket %s", bucket)
 		}
 		if err := writeFasta(w.buf, rec.id, rec.seq); err != nil {
 			return err
 		}
+		counts[bucket]++
+		if bucket == bucketSeenTrain {
+			seenTrainIDs[rec.id] = struct{}{}
+		}
 		return nil
 	})
-}
+	if err != nil {
+		return nil, nil, err
+	}
 
-func stablePIDOrder(ids []string) []string {
-	type item struct {
-		id   string
-		hash [16]byte
-	}
-	items := make([]item, 0, len(ids))
-	for _, id := range ids {
-		items = append(items, item{
-			id:   id,
-			hash: md5.Sum([]byte(id)),
-		})
-	}
-	// Order by hash first so splits remain stable as new records are appended.
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].hash != items[j].hash {
-			return lessHash(items[i].hash, items[j].hash)
-		}
-		return items[i].id < items[j].id
-	})
-
-	out := make([]string, len(items))
-	for i := range items {
-		out[i] = items[i].id
-	}
-	return out
+	return counts, seenTrainIDs, nil
 }
 
 func lessHash(a, b [16]byte) bool {
@@ -409,70 +557,18 @@ func classHashByte(label string) byte {
 	return sum[0]
 }
 
-func seenCounts(n int) (trainN, valN, testN int) {
-	if n < 8 {
-		return n, 0, 0
-	}
-	testN = ceilDiv(2*n, 10)
-	if testN > 25 {
-		testN = 25
-	}
-	remaining := n - testN
-	valN = ceilDiv(remaining, 20)
-	trainN = remaining - valN
-	return trainN, valN, testN
-}
-
-func unseenCounts(n int) (testN, valN, keyN int) {
-	testN = ceilDiv(2*n, 10)
-	if testN > 25 {
-		testN = 25
-	}
-	remaining := n - testN
-	valN = ceilDiv(remaining, 5)
-	keyN = remaining - valN
-	return testN, valN, keyN
-}
-
 func ceilDiv(a, b int) int {
-	if b <= 0 {
-		return 0
-	}
-	if a <= 0 {
+	if b <= 0 || a <= 0 {
 		return 0
 	}
 	return (a + b - 1) / b
 }
 
-func assignRange(assignments map[string]string, ids []string, start, end int, bucket string) {
-	if start < 0 {
-		start = 0
+func minInt(a, b int) int {
+	if a < b {
+		return a
 	}
-	if end > len(ids) {
-		end = len(ids)
-	}
-	for i := start; i < end; i++ {
-		assignments[ids[i]] = bucket
-	}
-}
-
-func countBuckets(assignments map[string]string, stats *splitStats) {
-	for _, bucket := range assignments {
-		switch bucket {
-		case "seen_train":
-			stats.SeenTrainRecords++
-		case "seen_val":
-			stats.SeenValRecords++
-		case "seen_test":
-			stats.SeenTestRecords++
-		case "unseen_test":
-			stats.UnseenTest++
-		case "unseen_val":
-			stats.UnseenVal++
-		case "unseen_key":
-			stats.UnseenKey++
-		}
-	}
+	return b
 }
 
 func writeSplitReport(path string, report splitReport) error {
@@ -491,13 +587,7 @@ func writeSplitReport(path string, report splitReport) error {
 	return nil
 }
 
-func pruneTaxdumpForSeenTrain(assignments map[string]string, taxdumpDir, taxidMapPath, outDir string) (string, int, error) {
-	seenTrainIDs := make(map[string]struct{})
-	for pid, bucket := range assignments {
-		if bucket == "seen_train" {
-			seenTrainIDs[pid] = struct{}{}
-		}
-	}
+func pruneTaxdumpForSeenTrain(seenTrainIDs map[string]struct{}, taxdumpDir, taxidMapPath, outDir string) (string, int, error) {
 	if len(seenTrainIDs) == 0 {
 		return "", 0, fmt.Errorf("no seen_train sequences found; cannot prune taxdump")
 	}
