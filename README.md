@@ -2,7 +2,7 @@
 [![CI](https://github.com/Doomsbay/boldkit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Doomsbay/boldkit/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Doomsbay/boldkit)](https://github.com/Doomsbay/boldkit/releases)
 [![Downloads](https://img.shields.io/github/downloads/Doomsbay/boldkit/total)](https://github.com/Doomsbay/boldkit/releases)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18382196.svg)](https://doi.org/10.5281/zenodo.18382196)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18464209.svg)](https://doi.org/10.5281/zenodo.18464209)
 [![License](https://img.shields.io/github/license/Doomsbay/boldkit)](LICENSE)
 
 Build NCBI-style taxonomy databases and marker-specific FASTA reference sets from BOLD public snapshots.
@@ -118,7 +118,7 @@ BOLD snapshot DOI: https://doi.org/10.5883/DP-BOLD_Public.26-Sep-2025
 
 TaxonKit paper: https://doi.org/10.1016/j.jgg.2021.03.006
 
-BoldKit Zenodo DOI: https://doi.org/10.5281/zenodo.18382196
+BoldKit Zenodo DOI: https://doi.org/10.5281/zenodo.18464209
 
 ## License
 The source code in this repository is licensed under the MIT License.
