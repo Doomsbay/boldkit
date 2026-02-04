@@ -80,17 +80,20 @@ func bioscanIsGenusToken(token string) bool {
 	if token == "" {
 		return false
 	}
-	runes := []rune(token)
-	first := runes[0]
-	if !unicode.IsLetter(first) || !unicode.IsUpper(first) {
-		return false
-	}
-	for _, r := range runes[1:] {
+	firstRune := true
+	for _, r := range token {
+		if firstRune {
+			firstRune = false
+			if !unicode.IsLetter(r) || !unicode.IsUpper(r) {
+				return false
+			}
+			continue
+		}
 		if !unicode.IsLetter(r) && r != '-' {
 			return false
 		}
 	}
-	return true
+	return !firstRune
 }
 
 func bioscanIsEpithetToken(token string) bool {
@@ -98,8 +101,7 @@ func bioscanIsEpithetToken(token string) bool {
 	if token == "" {
 		return false
 	}
-	runes := []rune(token)
-	for _, r := range runes {
+	for _, r := range token {
 		if unicode.IsLower(r) || r == '-' {
 			continue
 		}

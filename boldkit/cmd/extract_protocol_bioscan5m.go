@@ -153,7 +153,7 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 	speciesInfo := bioscanParseSpecies(rec.Species)
 	binInfo, hasBinCanonical := c.canonicalForBin(rec.BinURI)
 	genus := rec.Genus
-	species := rec.Species
+	var species string
 
 	switch speciesInfo.Kind {
 	case bioscanSpeciesResolved:
