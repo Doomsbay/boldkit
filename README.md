@@ -45,6 +45,7 @@ Wiki pages:
 - [Download](https://github.com/Doomsbay/boldkit/wiki/Download)
 - [Quick Start](https://github.com/Doomsbay/boldkit/wiki/Quick-Start)
 - [Usage](https://github.com/Doomsbay/boldkit/wiki/Usage)
+- [Splits + BIOSCAN-5M](https://github.com/Doomsbay/boldkit/wiki/Splits-and-BIOSCAN-5M)
 - [Examples](https://github.com/Doomsbay/boldkit/wiki/Examples)
 - [FAQ](https://github.com/Doomsbay/boldkit/wiki/FAQ)
 
@@ -97,6 +98,7 @@ When `--package` is set in the Go pipeline, the generated folders are moved unde
 Ranks: `kingdom -> phylum -> class -> order -> family -> subfamily -> tribe -> genus -> species`
 - Missing intermediate ranks are skipped.
 - If genus exists but species is missing, species is filled as `Genus sp. BIN` (or `Genus sp. PROCESSID`).
+- Optional extraction curation (`bioscan-5m`) is available; see wiki for rules and processing details.
 - Records without genus attach to the deepest available rank.
 - No artificial “Unidentified” taxa are created.
 - Each sequence is attached as a leaf using its processid.

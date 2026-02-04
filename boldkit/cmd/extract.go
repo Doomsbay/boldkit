@@ -15,10 +15,21 @@ func runExtract(args []string) {
 	fs := flag.NewFlagSet("extract", flag.ExitOnError)
 	input := fs.String("input", "BOLD_Public.*/BOLD_Public.*.tsv", "BOLD TSV input")
 	output := fs.String("output", "taxonkit_input.tsv", "Output taxonkit input TSV")
+	curateProtocol := fs.String("curate-protocol", extractCurationProtocolNone, "Extraction curation profile (none,bioscan-5m)")
+	curateReport := fs.String("curate-report", "", "Optional extraction curation JSON report path")
+	curateAudit := fs.String("curate-audit", "", "Optional extraction curation audit TSV path")
 	progressOn := fs.Bool("progress", true, "Show progress bar")
 	force := fs.Bool("force", false, "Overwrite existing outputs")
 	if err := fs.Parse(args); err != nil {
 		fatalf("parse args failed: %v", err)
+	}
+	curationCfg := extractCurationConfig{
+		Protocol:   *curateProtocol,
+		ReportPath: *curateReport,
+		AuditPath:  *curateAudit,
+	}.normalized()
+	if err := curationCfg.validate(); err != nil {
+		fatalf("invalid extraction curation config: %v", err)
 	}
 
 	if !*force && fileExists(*output) {
@@ -42,12 +53,12 @@ func runExtract(args []string) {
 		reportEvery = 1
 	}
 
-	if _, err := buildTaxonkit(*input, *output, reportEvery, totalRows); err != nil {
+	if _, err := buildTaxonkit(*input, *output, reportEvery, totalRows, curationCfg); err != nil {
 		fatalf("build failed: %v", err)
 	}
 }
 
-func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int) (int, error) {
+func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, curationCfg extractCurationConfig) (int, error) {
 	in, err := openInput(inputPath)
 	if err != nil {
 		return 0, fmt.Errorf("open input: %w", err)
@@ -55,6 +66,10 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int) (in
 	defer func() {
 		_ = in.Close()
 	}()
+	curator, err := newExtractCurator(curationCfg, inputPath)
+	if err != nil {
+		return 0, fmt.Errorf("create curation profile: %w", err)
+	}
 
 	out, err := os.Create(outputPath)
 	if err != nil {
@@ -108,28 +123,35 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int) (in
 		rowCount++
 		fields := strings.Split(scanner.Text(), "\t")
 
-		pid := field(fields, idxProcess)
-		bin := field(fields, idxBin)
-		kingdom := normalize(field(fields, idxKingdom))
-		phylum := normalize(field(fields, idxPhylum))
-		classVal := normalize(field(fields, idxClass))
-		orderVal := normalize(field(fields, idxOrder))
-		family := normalize(field(fields, idxFamily))
-		subfamily := normalize(field(fields, idxSubfamily))
-		tribe := normalize(field(fields, idxTribe))
-		genus := normalize(field(fields, idxGenus))
-		species := normalize(field(fields, idxSpecies))
+		record := extractTaxonRecord{
+			ProcessID: field(fields, idxProcess),
+			BinURI:    field(fields, idxBin),
+			Kingdom:   normalize(field(fields, idxKingdom)),
+			Phylum:    normalize(field(fields, idxPhylum)),
+			Class:     normalize(field(fields, idxClass)),
+			Order:     normalize(field(fields, idxOrder)),
+			Family:    normalize(field(fields, idxFamily)),
+			Subfamily: normalize(field(fields, idxSubfamily)),
+			Tribe:     normalize(field(fields, idxTribe)),
+			Genus:     normalize(field(fields, idxGenus)),
+			Species:   normalize(field(fields, idxSpecies)),
+		}
+		if err := curator.Curate(&record); err != nil {
+			return 0, fmt.Errorf("line %d curation failed: %w", rowCount+1, err)
+		}
 
-		if genus != "" && species == "" {
-			suffix := bin
-			if suffix == "" {
-				suffix = pid
+		if record.Genus != "" && record.Species == "" {
+			suffix := record.BinURI
+			if suffix == "" && !curationCfg.enabled() {
+				suffix = record.ProcessID
 			}
-			species = genus + " sp. " + suffix
+			if suffix != "" {
+				record.Species = record.Genus + " sp. " + suffix
+			}
 		}
 
 		line := strings.Join([]string{
-			kingdom, phylum, classVal, orderVal, family, subfamily, tribe, genus, species, pid,
+			record.Kingdom, record.Phylum, record.Class, record.Order, record.Family, record.Subfamily, record.Tribe, record.Genus, record.Species, record.ProcessID,
 		}, "\t")
 		if _, err := writer.WriteString(line + "\n"); err != nil {
 			return 0, fmt.Errorf("write row: %w", err)
@@ -142,5 +164,8 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int) (in
 	}
 
 	progress.finish()
+	if err := curator.Close(); err != nil {
+		return 0, fmt.Errorf("finalize curation profile: %w", err)
+	}
 	return rowCount, nil
 }

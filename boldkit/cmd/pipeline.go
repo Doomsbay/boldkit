@@ -34,8 +34,19 @@ func runPipeline(args []string) {
 	skipManifest := fs.Bool("skip-manifest", false, "Skip manifest.json (only when --package)")
 	skipChecksums := fs.Bool("skip-checksums", false, "Skip SHA256SUMS.txt (only when --package)")
 	snapshot := fs.String("snapshot-id", "", "Snapshot ID suffix for releases (default: derive from input filename)")
+	extractCurateProtocol := fs.String("extract-curate-protocol", extractCurationProtocolNone, "Extraction curation profile (none,bioscan-5m)")
+	extractCurateReport := fs.String("extract-curate-report", "", "Optional extraction curation JSON report path")
+	extractCurateAudit := fs.String("extract-curate-audit", "", "Optional extraction curation audit TSV path")
 	if err := fs.Parse(args); err != nil {
 		fatalf("parse args failed: %v", err)
+	}
+	extractCfg := extractCurationConfig{
+		Protocol:   *extractCurateProtocol,
+		ReportPath: *extractCurateReport,
+		AuditPath:  *extractCurateAudit,
+	}.normalized()
+	if err := extractCfg.validate(); err != nil {
+		fatalf("invalid extraction curation config: %v", err)
 	}
 
 	snap := *snapshot
@@ -59,17 +70,17 @@ func runPipeline(args []string) {
 		reportEvery = 1
 	}
 
-	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap); err != nil {
+	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap, extractCfg); err != nil {
 		fatalf("pipeline failed: %v", err)
 	}
 }
 
-func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string) error {
+func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extractCurationConfig) error {
 	logf("Extract taxonomy -> %s", taxonkitOut)
 	if fileExists(taxonkitOut) && !force {
 		logf("taxonkit TSV exists, skipping (use --force to overwrite): %s", taxonkitOut)
 	} else {
-		if _, err := buildTaxonkit(input, taxonkitOut, reportEvery, totalRows); err != nil {
+		if _, err := buildTaxonkit(input, taxonkitOut, reportEvery, totalRows, extractCfg); err != nil {
 			return fmt.Errorf("build taxonkit TSV: %w", err)
 		}
 	}
