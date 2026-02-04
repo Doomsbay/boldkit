@@ -3,21 +3,36 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"strings"
 )
 
 type bioscan5MCurator struct {
-	cfg      extractCurationConfig
-	resolver *bioscanBinSpeciesResolver
+	cfg            extractCurationConfig
+	inputPath      string
+	resolver       *bioscanBinSpeciesResolver
+	binCanonical   map[string]bioscanSpeciesInfo
+	binsObserved   int
+	binsCanonical  int
+	binsConflicted int
+	stats          bioscanCurationStats
+	auditFile      *os.File
+	auditWriter    *bufio.Writer
 }
 
 func newExtractBioscan5MCurator(cfg extractCurationConfig, inputPath string) (extractCurator, error) {
 	c := &bioscan5MCurator{
-		cfg:      cfg,
-		resolver: newBioscanBinSpeciesResolver(),
+		cfg:          cfg,
+		inputPath:    inputPath,
+		resolver:     newBioscanBinSpeciesResolver(),
+		binCanonical: make(map[string]bioscanSpeciesInfo),
+	}
+	if err := c.openAudit(); err != nil {
+		return nil, err
 	}
 	if inputPath != "" {
 		if err := c.prime(inputPath); err != nil {
+			_ = c.closeAudit()
 			return nil, err
 		}
 	}
@@ -62,16 +77,39 @@ func (c *bioscan5MCurator) prime(inputPath string) error {
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scan bioscan prime input: %w", err)
 	}
+	c.buildBinDecisions()
 	return nil
 }
 
+func (c *bioscan5MCurator) buildBinDecisions() {
+	c.binsObserved = 0
+	c.binsCanonical = 0
+	c.binsConflicted = 0
+	c.binCanonical = make(map[string]bioscanSpeciesInfo)
+	for bin := range c.resolver.counts {
+		c.binsObserved++
+		resolution := c.resolver.Resolve(bin)
+		if resolution.Accepted {
+			info := bioscanParseSpecies(resolution.Canonical)
+			if info.Kind == bioscanSpeciesResolved && info.Canonical != "" {
+				c.binCanonical[bin] = info
+				c.binsCanonical++
+			}
+			continue
+		}
+		if resolution.Conflict {
+			c.binsConflicted++
+		}
+	}
+}
+
 func (c *bioscan5MCurator) canonicalForBin(binURI string) (bioscanSpeciesInfo, bool) {
-	canon, ok := c.resolver.Canonical(binURI)
-	if !ok || canon == "" {
+	bin := bioscanNormalizeLabel(binURI)
+	if bin == "" {
 		return bioscanSpeciesInfo{}, false
 	}
-	info := bioscanParseSpecies(canon)
-	if info.Kind != bioscanSpeciesResolved || info.Canonical == "" {
+	info, ok := c.binCanonical[bin]
+	if !ok {
 		return bioscanSpeciesInfo{}, false
 	}
 	return info, true
@@ -81,6 +119,9 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 	if rec == nil {
 		return nil
 	}
+	c.stats.RowsTotal++
+	original := *rec
+	ruleSet := make(map[string]struct{})
 
 	rec.Kingdom = bioscanNormalizeLabel(rec.Kingdom)
 	rec.Phylum = bioscanNormalizeLabel(rec.Phylum)
@@ -92,13 +133,21 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 	rec.Genus = bioscanNormalizeLabel(rec.Genus)
 	rec.Species = bioscanNormalizeLabel(rec.Species)
 	rec.BinURI = bioscanNormalizeLabel(rec.BinURI)
+	if rec.Kingdom != original.Kingdom || rec.Phylum != original.Phylum || rec.Class != original.Class ||
+		rec.Order != original.Order || rec.Family != original.Family || rec.Subfamily != original.Subfamily ||
+		rec.Tribe != original.Tribe || rec.Genus != original.Genus || rec.Species != original.Species ||
+		rec.BinURI != original.BinURI {
+		ruleSet[rulePlaceholderNormalize] = struct{}{}
+	}
 
 	if rec.Family != "" && rec.Tribe != "" && rec.Subfamily == "" {
 		rec.Subfamily = rec.Family + " subfam. incertae sedis"
+		ruleSet[ruleSubfamilyFill] = struct{}{}
 	}
 
 	if rec.Genus != "" && bioscanIsEpithetToken(rec.Species) {
 		rec.Species = rec.Genus + " " + strings.ToLower(rec.Species)
+		ruleSet[ruleEpithetOnlyFix] = struct{}{}
 	}
 
 	speciesInfo := bioscanParseSpecies(rec.Species)
@@ -111,6 +160,7 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 		if genus == "" {
 			genus = speciesInfo.Genus
 			species = speciesInfo.Canonical
+			ruleSet[ruleGenusFromResolved] = struct{}{}
 			break
 		}
 
@@ -123,31 +173,62 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 		if hasBinCanonical && strings.EqualFold(genus, binInfo.Genus) {
 			genus = binInfo.Genus
 			species = binInfo.Canonical
+			ruleSet[ruleBinCanonicalAdopt] = struct{}{}
 			break
 		}
 		species = bioscanProvisionalSpecies(genus, rec.BinURI)
+		ruleSet[ruleGenusSpeciesMismatchDemote] = struct{}{}
 
 	case bioscanSpeciesOpen, bioscanSpeciesEmpty:
 		if genus == "" {
 			genus = bioscanInferGenus(speciesInfo.Normalized)
+			if genus != "" {
+				ruleSet[ruleGenusInferred] = struct{}{}
+			}
 		}
 
 		if hasBinCanonical && (genus == "" || strings.EqualFold(genus, binInfo.Genus)) {
 			genus = binInfo.Genus
 			species = binInfo.Canonical
+			ruleSet[ruleBinCanonicalAdopt] = struct{}{}
 			break
 		}
 
 		species = bioscanProvisionalSpecies(genus, rec.BinURI)
+		ruleSet[ruleOpenToBinProvisional] = struct{}{}
 	default:
 		species = bioscanProvisionalSpecies(genus, rec.BinURI)
+		ruleSet[ruleOpenToBinProvisional] = struct{}{}
 	}
 
 	rec.Genus = genus
 	rec.Species = species
+	_, provisionalRule := ruleSet[ruleOpenToBinProvisional]
+	_, mismatchRule := ruleSet[ruleGenusSpeciesMismatchDemote]
+	if (provisionalRule || mismatchRule) && rec.Species == "" {
+		ruleSet[ruleProvisionalDroppedNoBin] = struct{}{}
+	}
+	changed := original.Genus != rec.Genus || original.Species != rec.Species || original.Subfamily != rec.Subfamily ||
+		original.Kingdom != rec.Kingdom || original.Phylum != rec.Phylum || original.Class != rec.Class ||
+		original.Order != rec.Order || original.Family != rec.Family || original.Tribe != rec.Tribe || original.BinURI != rec.BinURI
+	if changed {
+		c.stats.RowsChanged++
+	}
+	c.stats.addRules(ruleSet)
+	if err := c.writeAuditRow(original, *rec, ruleSet, changed); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (c *bioscan5MCurator) Close() error {
-	return nil
+	logf("extract (%s): bins-observed=%d bins-canonical=%d bins-conflicted=%d", extractCurationProtocolBioscan5M, c.binsObserved, c.binsCanonical, c.binsConflicted)
+	var firstErr error
+	if err := c.writeReport(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := c.closeAudit(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }

@@ -187,6 +187,12 @@ type bioscanBinSpeciesResolver struct {
 	counts map[string]map[string]int
 }
 
+type bioscanBinResolution struct {
+	Canonical string
+	Accepted  bool
+	Conflict  bool
+}
+
 func newBioscanBinSpeciesResolver() *bioscanBinSpeciesResolver {
 	return &bioscanBinSpeciesResolver{
 		counts: make(map[string]map[string]int),
@@ -219,30 +225,54 @@ func (r *bioscanBinSpeciesResolver) Observe(binURI, genus, species string) {
 	bySpecies[info.Canonical]++
 }
 
-func (r *bioscanBinSpeciesResolver) Canonical(binURI string) (string, bool) {
+func (r *bioscanBinSpeciesResolver) Resolve(binURI string) bioscanBinResolution {
 	if r == nil {
-		return "", false
+		return bioscanBinResolution{}
 	}
 	bin := bioscanNormalizeLabel(binURI)
 	if bin == "" {
-		return "", false
+		return bioscanBinResolution{}
 	}
 
 	bySpecies, ok := r.counts[bin]
 	if !ok || len(bySpecies) == 0 {
-		return "", false
+		return bioscanBinResolution{}
+	}
+
+	if len(bySpecies) == 1 {
+		for species := range bySpecies {
+			return bioscanBinResolution{
+				Canonical: species,
+				Accepted:  true,
+			}
+		}
 	}
 
 	best := ""
 	bestCount := -1
+	second := -1
+	total := 0
 	for species, count := range bySpecies {
+		total += count
 		if count > bestCount || (count == bestCount && (best == "" || strings.Compare(species, best) < 0)) {
+			second = bestCount
 			best = species
 			bestCount = count
+			continue
+		}
+		if count > second {
+			second = count
 		}
 	}
-	if best == "" {
-		return "", false
+
+	// Accept only when there is a strict majority and a unique top species.
+	if best != "" && bestCount > second && bestCount*2 > total {
+		return bioscanBinResolution{
+			Canonical: best,
+			Accepted:  true,
+		}
 	}
-	return best, true
+	return bioscanBinResolution{
+		Conflict: true,
+	}
 }

@@ -86,27 +86,27 @@ func TestBioscanBinSpeciesResolverCanonical(t *testing.T) {
 	resolver.Observe("BOLD:AAA1111", "Homo", "Homo sapiens")
 	resolver.Observe("BOLD:AAA1111", "Homo", "Homo erectus")
 
-	got, ok := resolver.Canonical("BOLD:AAA1111")
-	if !ok {
-		t.Fatalf("resolver.Canonical() returned !ok")
+	res := resolver.Resolve("BOLD:AAA1111")
+	if !res.Accepted {
+		t.Fatalf("resolver.Resolve() returned !accepted")
 	}
-	if got != "Homo sapiens" {
-		t.Fatalf("resolver.Canonical()=%q want %q", got, "Homo sapiens")
+	if res.Canonical != "Homo sapiens" {
+		t.Fatalf("resolver.Resolve().Canonical=%q want %q", res.Canonical, "Homo sapiens")
 	}
 }
 
-func TestBioscanBinSpeciesResolverTieBreakLexical(t *testing.T) {
+func TestBioscanBinSpeciesResolverConflictOnTie(t *testing.T) {
 	resolver := newBioscanBinSpeciesResolver()
 
 	resolver.Observe("BOLD:TIE0001", "Panthera", "Panthera leo")
 	resolver.Observe("BOLD:TIE0001", "Panthera", "Panthera onca")
 
-	got, ok := resolver.Canonical("BOLD:TIE0001")
-	if !ok {
-		t.Fatalf("resolver.Canonical() returned !ok")
+	res := resolver.Resolve("BOLD:TIE0001")
+	if res.Accepted {
+		t.Fatalf("resolver.Resolve() unexpectedly accepted tie case")
 	}
-	if got != "Panthera leo" {
-		t.Fatalf("resolver.Canonical()=%q want %q", got, "Panthera leo")
+	if !res.Conflict {
+		t.Fatalf("resolver.Resolve() expected conflict=true for tie case")
 	}
 }
 
@@ -117,7 +117,25 @@ func TestBioscanBinSpeciesResolverIgnoresUnresolvedAndMismatch(t *testing.T) {
 	resolver.Observe("BOLD:BAD0001", "Homo", "None")
 	resolver.Observe("BOLD:BAD0001", "Canis", "Homo sapiens")
 
-	if got, ok := resolver.Canonical("BOLD:BAD0001"); ok || got != "" {
-		t.Fatalf("resolver.Canonical()=%q,%v want empty,false", got, ok)
+	res := resolver.Resolve("BOLD:BAD0001")
+	if res.Accepted || res.Canonical != "" || res.Conflict {
+		t.Fatalf("resolver.Resolve()=%+v want empty unresolved state", res)
+	}
+}
+
+func TestBioscanBinSpeciesResolverConflictWithoutMajority(t *testing.T) {
+	resolver := newBioscanBinSpeciesResolver()
+
+	resolver.Observe("BOLD:WEAK1", "Apis", "Apis mellifera")
+	resolver.Observe("BOLD:WEAK1", "Apis", "Apis cerana")
+	resolver.Observe("BOLD:WEAK1", "Apis", "Apis dorsata")
+	resolver.Observe("BOLD:WEAK1", "Apis", "Apis mellifera")
+
+	res := resolver.Resolve("BOLD:WEAK1")
+	if res.Accepted {
+		t.Fatalf("resolver.Resolve() unexpectedly accepted non-majority case")
+	}
+	if !res.Conflict {
+		t.Fatalf("resolver.Resolve() expected conflict=true for non-majority case")
 	}
 }

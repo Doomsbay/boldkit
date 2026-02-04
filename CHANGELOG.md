@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Optional extraction curation profile: `bioscan-5m` (`extract` and `pipeline` pass-through).
+- BIOSCAN extraction engine with placeholder normalization, genus/species consistency fixes, subfamily hole filling, BIN-aware canonical species reuse, and deterministic BIN conflict handling.
+- Optional extraction curation trace outputs: JSON summary report and per-record audit TSV.
+- Unit tests for BIOSCAN species parsing/resolution, conflict policy behavior, protocol fallback behavior, and report/audit generation.
+
 ## [v0.3.0] - 2026-02-02
 
 ### Added
