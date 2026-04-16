@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.2]
+
+### Added
+- Makefile with `build`, `test`, `lint`, `bench`, `cover`, `clean`, and `install` targets.
+- `.golangci.yml` configuration for golangci-lint v2 (errcheck, govet, staticcheck, unused, misspell, gofmt).
+- `version`, `--version`, `-v` subcommand with automatic version from git tags via ldflags.
+- Version displayed in the usage banner.
+
+### Changed
+- CI pipeline: upgraded golangci-lint action v4 to v6, replaced `validate` job with `test` job (`make test`), removed redundant `go vet` step.
+- Release archives now contain a binary named `boldkit` (or `boldkit.exe`) instead of `boldkit_<version>_<os>_<arch>`, simplifying install.
+- `package.sh` now injects version via ldflags so release binaries report the correct version.
+- Local builds output to `dist/boldkit` instead of the project root.
+
+### Fixed
+- `gofmt` formatting in `fasta.go`, `format.go`, `progress.go`.
+
 ## [v0.4.1]
 
 ### Added
