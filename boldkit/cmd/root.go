@@ -5,7 +5,11 @@ import (
 	"os"
 )
 
-func Execute(args []string) {
+var appVersion string
+
+func Execute(args []string, version string) {
+	appVersion = version
+
 	if len(args) < 1 {
 		printUsage()
 		os.Exit(1)
@@ -28,6 +32,8 @@ func Execute(args []string) {
 		runQC(args[1:])
 	case "format":
 		runFormat(args[1:])
+	case "version", "-v", "--version":
+		fmt.Println("boldkit", appVersion)
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -38,7 +44,7 @@ func Execute(args []string) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "BoldKit - BOLD TSV processing tools")
+	fmt.Fprintf(os.Stderr, "BoldKit %s - BOLD TSV processing tools\n", appVersion)
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  boldkit <command> [options]")

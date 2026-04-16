@@ -6,3 +6,19 @@ boldkit/binaries
 bold-taxdump/
 classifier_outputs/
 marker_fastas/
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dist/
+coverage.out
+coverage.html
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

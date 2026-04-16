@@ -42,14 +42,15 @@ for plat in "${platforms[@]}"; do
     os_label="macos"
   fi
 
-  bin_name="boldkit_${version}_${os_label}_${GOARCH}${ext}"
+  bin_name="boldkit${ext}"
   out_path="${tmp_dir}/${bin_name}"
 
   echo "Building ${GOOS}/${GOARCH}..."
-  (cd "${repo_root}" && GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -o "${out_path}" ./boldkit)
+  (cd "${repo_root}" && GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 go build -ldflags "-X main.version=${version}" -o "${out_path}" ./boldkit)
 
   archive_name="boldkit_${version}_${os_label}_${GOARCH}.${archive_ext}"
   (cd "${tmp_dir}" && tar -czf "${dist_dir}/${archive_name}" "${bin_name}")
+  rm -f "${out_path}"
 
 done
 

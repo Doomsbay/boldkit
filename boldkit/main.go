@@ -6,6 +6,8 @@ import (
 	"github.com/Doomsbay/BoldKit/boldkit/cmd"
 )
 
+var version = "dev"
+
 func main() {
-	cmd.Execute(os.Args[1:])
+	cmd.Execute(os.Args[1:], version)
 }
