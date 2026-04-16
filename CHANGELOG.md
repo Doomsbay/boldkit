@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.4.0]
 
 ### Added
 - Optional extraction curation profile: `bioscan-5m` (`extract` and `pipeline` pass-through).
