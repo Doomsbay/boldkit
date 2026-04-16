@@ -40,10 +40,10 @@ type splitStats struct {
 }
 
 type splitReport struct {
-	Input       string    `json:"input"`
-	OutDir      string    `json:"out_dir"`
-	Classifiers []string  `json:"classifiers"`
-	PrunedTaxa  int       `json:"pruned_taxids"`
+	Input       string     `json:"input"`
+	OutDir      string     `json:"out_dir"`
+	Classifiers []string   `json:"classifiers"`
+	PrunedTaxa  int        `json:"pruned_taxids"`
 	Stats       splitStats `json:"stats"`
 }
 
