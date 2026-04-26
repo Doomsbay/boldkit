@@ -40,42 +40,32 @@ func newExtractBioscan5MCurator(cfg extractCurationConfig, inputPath string) (ex
 }
 
 func (c *bioscan5MCurator) prime(inputPath string) error {
-	in, err := openInput(inputPath)
-	if err != nil {
-		return fmt.Errorf("open input for bioscan prime: %w", err)
-	}
-	defer func() {
-		_ = in.Close()
-	}()
+	opts := DefaultOptions()
+	var (
+		idxBin     = -1
+		idxGenus   = -1
+		idxSpecies = -1
+	)
 
-	scanner := bufio.NewScanner(in)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 50*1024*1024)
-
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("read bioscan prime header: %w", err)
+	err := ParseRows(inputPath, opts, func(row Row) error {
+		if idxBin < 0 {
+			idxBin = indexOfBytes(row.Fields, "bin_uri")
+			idxGenus = indexOfBytes(row.Fields, "genus")
+			idxSpecies = indexOfBytes(row.Fields, "species")
+			if idxBin < 0 || idxGenus < 0 || idxSpecies < 0 {
+				return fmt.Errorf("required headers missing in input (bin_uri, genus, species)")
+			}
+			return nil
 		}
-		return fmt.Errorf("input TSV is empty")
-	}
 
-	header := strings.Split(scanner.Text(), "\t")
-	idxBin := indexOf(header, "bin_uri")
-	idxGenus := indexOf(header, "genus")
-	idxSpecies := indexOf(header, "species")
-	if idxBin < 0 || idxGenus < 0 || idxSpecies < 0 {
-		return fmt.Errorf("required headers missing in input TSV")
-	}
-
-	for scanner.Scan() {
-		fields := strings.Split(scanner.Text(), "\t")
-		binURI := bioscanNormalizeLabel(field(fields, idxBin))
-		genus := bioscanNormalizeLabel(field(fields, idxGenus))
-		species := bioscanNormalizeLabel(field(fields, idxSpecies))
+		binURI := bioscanNormalizeLabel(string(fieldBytes(row.Fields, idxBin)))
+		genus := bioscanNormalizeLabel(string(fieldBytes(row.Fields, idxGenus)))
+		species := bioscanNormalizeLabel(string(fieldBytes(row.Fields, idxSpecies)))
 		c.resolver.Observe(binURI, genus, species)
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan bioscan prime input: %w", err)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("bioscan prime: %w", err)
 	}
 	c.buildBinDecisions()
 	return nil

@@ -52,27 +52,11 @@ func normalizeBytes(value []byte) []byte {
 	return value
 }
 
-func field(fields []string, idx int) string {
-	if idx < 0 || idx >= len(fields) {
-		return ""
-	}
-	return fields[idx]
-}
-
 func fieldBytes(fields [][]byte, idx int) []byte {
 	if idx < 0 || idx >= len(fields) {
 		return nil
 	}
 	return fields[idx]
-}
-
-func indexOf(values []string, name string) int {
-	for i, v := range values {
-		if v == name {
-			return i
-		}
-	}
-	return -1
 }
 
 func indexOfBytes(values [][]byte, name string) int {
