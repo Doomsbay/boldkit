@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 
-Usage: bolddb-taxdump.sh [options] [input_tsv] [taxonkit_input] [taxdump_dir] [marker_dir] [releases_dir]
+Usage: boldkit.sh [options] [input_tsv] [taxonkit_input] [taxdump_dir] [marker_dir] [releases_dir]
 
 Options:
   --input PATH           BOLD TSV input (default: ./BOLD_Public.*/BOLD_Public.*.tsv)

@@ -27,7 +27,7 @@ if [[ -s "${output_file}" ]]; then
   exit 0
 fi
 
-mapfile -t files < <(find "${artifact_dir}" -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.tsv.gz' \) -printf '%f\n' | sort)
+mapfile -t files < <(find "${artifact_dir}" -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.tsv.gz' \) -print0 | sort -z | while IFS= read -r -d '' f; do basename "$f"; done)
 
 if (( ${#files[@]} == 0 )); then
   echo "No packaged files found in ${artifact_dir}" >&2

@@ -29,7 +29,8 @@ if [[ -d "${input_target}" ]]; then
     -outdir "${output_dir}" \
     -taxdump-dir "${taxdump_dir}" \
     -classifier "${classifiers}" \
-    ${compress_flag}
+  ${compress_flag}
+
   exit 0
 fi
 

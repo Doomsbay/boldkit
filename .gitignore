@@ -1,4 +1,7 @@
-BOLD_Public.26-Sep-2025/
+BOLD_Public.*.parquet
+BOLD_Public.*.tsv
+BOLD_Public.*.tsv.gz
+boldkit.wiki/
 taxonkit_input.tsv
 releases/
 boldkit/dist

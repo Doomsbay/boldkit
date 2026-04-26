@@ -33,7 +33,7 @@ if [[ ! -d "${marker_dir}" ]]; then
 fi
 
 commit_hash="unknown"
-repo_root="$(cd "$(dirname "${releases_dir}")" && pwd)"
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 if command -v git >/dev/null 2>&1; then
   if git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if git -C "${repo_root}" rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -69,16 +69,19 @@ if (( marker_file_count > 0 )); then
   done
 fi
 
-cat <<EOF > "${output_file}"
-{
-  "snapshot_id": "${snapshot_id}",
-  "commit_hash": "${commit_hash}",
-  "counts": {
-    "nodes": ${nodes_count},
-    "names": ${names_count},
-    "taxid_map": ${taxid_count},
-    "marker_fasta_files": ${marker_file_count},
-    "marker_fasta_sequences": ${marker_seq_count}
-  }
+python3 -c "
+import json, sys
+m = {
+    'snapshot_id': sys.argv[1],
+    'commit_hash': sys.argv[2],
+    'counts': {
+        'nodes': int(sys.argv[3]),
+        'names': int(sys.argv[4]),
+        'taxid_map': int(sys.argv[5]),
+        'marker_fasta_files': int(sys.argv[6]),
+        'marker_fasta_sequences': int(sys.argv[7]),
+    },
 }
-EOF
+json.dump(m, sys.stdout, indent=2)
+print()
+" "${snapshot_id}" "${commit_hash}" "${nodes_count}" "${names_count}" "${taxid_count}" "${marker_file_count}" "${marker_seq_count}" > "${output_file}"

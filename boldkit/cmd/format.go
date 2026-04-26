@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,10 +23,10 @@ type formatConfig struct {
 }
 
 type formatStats struct {
-	Total        int `json:"total"`
-	Written      int `json:"written"`
-	MissingTaxID int `json:"missing_taxid"`
-	MissingRanks int `json:"missing_ranks"`
+	Total        int
+	Written      int
+	MissingTaxID int
+	MissingRanks int
 }
 
 func runFormat(args []string) {
@@ -364,21 +365,12 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 		return writerHandle{w: bufio.NewWriterSize(f, writerBufferSize), f: f}, nil
 	}
 
-	openText := func(name string) (writerHandle, error) {
-		path := filepath.Join(outDir, name)
-		f, err := os.Create(path)
-		if err != nil {
-			return writerHandle{}, fmt.Errorf("create %s: %w", path, err)
-		}
-		return writerHandle{w: bufio.NewWriterSize(f, writerBufferSize), f: f}, nil
-	}
-
 	if _, ok := needs["blast"]; ok {
 		bw, err := openFasta("blast.fasta")
 		if err != nil {
 			return nil, err
 		}
-		mw, err := openText("blast_seqid2taxid.map")
+		mw, err := openFasta("blast_seqid2taxid.map")
 		if err != nil {
 			return nil, err
 		}
@@ -404,7 +396,7 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 		if err != nil {
 			return nil, err
 		}
-		tw, err := openText("rdp_taxonomy.txt")
+		tw, err := openFasta("rdp_taxonomy.txt")
 		if err != nil {
 			return nil, err
 		}
@@ -416,7 +408,7 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 		if err != nil {
 			return nil, err
 		}
-		tw, err := openText("idtaxa_lineage.tsv")
+		tw, err := openFasta("idtaxa_lineage.tsv")
 		if err != nil {
 			return nil, err
 		}
@@ -428,7 +420,7 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 		if err != nil {
 			return nil, err
 		}
-		tw, err := openText("protax_seqid2tax.tsv")
+		tw, err := openFasta("protax_seqid2tax.tsv")
 		if err != nil {
 			return nil, err
 		}
@@ -496,6 +488,9 @@ func sintaxLineage(names []string) string {
 			break
 		}
 		parts = append(parts, prefixes[i]+":"+name)
+	}
+	if len(names) > len(prefixes) {
+		log.Printf("sintax: dropping %d ranks beyond species for %v", len(names)-len(prefixes), names)
 	}
 	return strings.Join(parts, ",")
 }

@@ -33,17 +33,17 @@ if [[ -s "${marker_archive}" ]]; then
   need_marker="false"
 fi
 
-if [[ ! -d "${taxdump_dir}" ]]; then
-  echo "Directory not found: ${taxdump_dir}" >&2
-  exit 1
-fi
-
 if [[ "${need_taxdump}" == "false" && "${need_marker}" == "false" ]]; then
   echo "Release packages already exist, skipping: ${output_dir}" >&2
   exit 0
 fi
 
-if [[ ! -d "${marker_dir}" ]]; then
+if [[ "${need_taxdump}" == "true" && ! -d "${taxdump_dir}" ]]; then
+  echo "Directory not found: ${taxdump_dir}" >&2
+  exit 1
+fi
+
+if [[ "${need_marker}" == "true" && ! -d "${marker_dir}" ]]; then
   echo "Directory not found: ${marker_dir}" >&2
   exit 1
 fi

@@ -127,6 +127,10 @@ func (b *rdpTaxonomyBuilder) resolveName(name, rank, parentKey string, depth int
 
 // disambiguate handles same name under different parent by prefixing with parent name
 func (b *rdpTaxonomyBuilder) disambiguate(name, rank, parentKey string, depth int) string {
+	if depth > 50 {
+		key := name + "|" + rank
+		return key
+	}
 	parent := b.nodes[parentKey]
 	disambigName := parent.name + "_" + name
 
@@ -140,7 +144,7 @@ func (b *rdpTaxonomyBuilder) disambiguate(name, rank, parentKey string, depth in
 			return existingKey
 		}
 		// Still conflicts, recurse with grandparent prefix
-		return b.disambiguate(disambigName, rank, parentKey, depth)
+		return b.disambiguate(disambigName, rank, parentKey, depth+1)
 	}
 
 	// Create disambiguated node
