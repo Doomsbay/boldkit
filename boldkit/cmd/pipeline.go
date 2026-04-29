@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 func runPipeline(args []string) {
@@ -75,24 +77,24 @@ func runPipeline(args []string) {
 }
 
 func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extractCurationConfig) error {
-	logf("Input format: %s", InputFormat(input))
-	logf("Extract taxonomy -> %s", taxonkitOut)
+	util.Logf("Input format: %s", InputFormat(input))
+	util.Logf("Extract taxonomy -> %s", taxonkitOut)
 	if fileExists(taxonkitOut) && !force {
-		logf("taxonkit TSV exists, skipping (use --force to overwrite): %s", taxonkitOut)
+		util.Logf("taxonkit TSV exists, skipping (use --force to overwrite): %s", taxonkitOut)
 	} else {
 		if _, err := buildTaxonkit(input, taxonkitOut, reportEvery, totalRows, extractCfg); err != nil {
 			return fmt.Errorf("build taxonkit TSV: %w", err)
 		}
 	}
 
-	logf("Build taxdump -> %s", taxdumpDir)
+	util.Logf("Build taxdump -> %s", taxdumpDir)
 	if err := runTaxonkitCreate(taxonkitBin, taxonkitOut, taxdumpDir, force); err != nil {
 		return fmt.Errorf("taxonkit create-taxdump: %w", err)
 	}
 
-	logf("Build marker FASTAs -> %s", markerDir)
+	util.Logf("Build marker FASTAs -> %s", markerDir)
 	if outputsExist(markerDir) && !force {
-		logf("marker FASTAs exist, skipping (use --force to overwrite): %s", markerDir)
+		util.Logf("marker FASTAs exist, skipping (use --force to overwrite): %s", markerDir)
 	} else {
 		if err := os.MkdirAll(markerDir, 0o755); err != nil {
 			return fmt.Errorf("create marker output dir: %w", err)
@@ -133,7 +135,7 @@ func runTaxonkitCreate(bin, input, outputDir string, force bool) error {
 	}
 
 	if !force && fileExists(filepath.Join(outputDir, "nodes.dmp")) && fileExists(filepath.Join(outputDir, "names.dmp")) && fileExists(filepath.Join(outputDir, "taxid.map")) {
-		logf("taxdump exists, skipping (use --force to overwrite): %s", outputDir)
+		util.Logf("taxdump exists, skipping (use --force to overwrite): %s", outputDir)
 		return nil
 	}
 
@@ -190,11 +192,11 @@ func packageTaxonkitGzipPath(taxonkitOut, releaseDir, snapshot string) string {
 
 func packageTaxonkitGzip(src, dest string, force bool) error {
 	if filepath.Clean(src) == filepath.Clean(dest) {
-		logf("taxonkit gzip already in release dir: %s", dest)
+		util.Logf("taxonkit gzip already in release dir: %s", dest)
 		return nil
 	}
 	if fileExists(dest) && !force {
-		logf("taxonkit gzip exists, skipping (use --force to overwrite): %s", dest)
+		util.Logf("taxonkit gzip exists, skipping (use --force to overwrite): %s", dest)
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -259,7 +261,7 @@ func copyFile(src, dest string) error {
 
 func packageDirGzip(srcDir, destTarGz string, force bool) error {
 	if fileExists(destTarGz) && !force {
-		logf("archive exists, skipping (use --force to overwrite): %s", destTarGz)
+		util.Logf("archive exists, skipping (use --force to overwrite): %s", destTarGz)
 		return nil
 	}
 
@@ -329,7 +331,7 @@ func packageDirGzip(srcDir, destTarGz string, force bool) error {
 
 func writeChecksums(releaseDir, outputFile string, force bool) error {
 	if fileExists(outputFile) && !force {
-		logf("checksums exist, skipping (use --force to overwrite): %s", outputFile)
+		util.Logf("checksums exist, skipping (use --force to overwrite): %s", outputFile)
 		return nil
 	}
 
@@ -391,7 +393,7 @@ func sha256File(path string) (string, error) {
 
 func writeManifest(path, taxdumpDir, markerDir, snapshot string, force bool) error {
 	if fileExists(path) && !force {
-		logf("manifest exists, skipping (use --force to overwrite): %s", path)
+		util.Logf("manifest exists, skipping (use --force to overwrite): %s", path)
 		return nil
 	}
 
@@ -514,8 +516,4 @@ func safeTag(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func logf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "[boldkit] "+format+"\n", args...)
 }

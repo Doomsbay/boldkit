@@ -45,65 +45,6 @@ func snapshotID(inputPath string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-func normalizeBytes(value []byte) []byte {
-	if isNone(value) {
-		return nil
-	}
-	return value
-}
-
-func fieldBytes(fields [][]byte, idx int) []byte {
-	if idx < 0 || idx >= len(fields) {
-		return nil
-	}
-	return fields[idx]
-}
-
-func indexOfBytes(values [][]byte, name string) int {
-	for i, v := range values {
-		if string(v) == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func filterSeqBytes(dst []byte, src []byte) []byte {
-	dst = dst[:0]
-	for _, c := range src {
-		switch c {
-		case 'A', 'C', 'G', 'T':
-			dst = append(dst, c)
-		case 'a', 'c', 'g', 't':
-			dst = append(dst, c-32)
-		}
-	}
-	return dst
-}
-
-func sanitizeMarkerBytes(dst []byte, src []byte) string {
-	dst = dst[:0]
-	dst = append(dst, src...)
-	for i := 0; i < len(dst); i++ {
-		c := dst[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
-			continue
-		}
-		dst[i] = '_'
-	}
-	return string(dst)
-}
-
-func maxIndex(values ...int) int {
-	max := -1
-	for _, v := range values {
-		if v > max {
-			max = v
-		}
-	}
-	return max
-}
-
 func countLines(path string) (int, error) {
 	in, err := openInput(path)
 	if err != nil {
@@ -222,8 +163,4 @@ func fileSize(path string) int64 {
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
-}
-
-func isNone(b []byte) bool {
-	return len(b) == 4 && b[0] == 'N' && b[1] == 'o' && b[2] == 'n' && b[3] == 'e'
 }

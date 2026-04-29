@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 type qcConfig struct {
@@ -83,7 +85,7 @@ func runQC(args []string) {
 		MaxInvalid:   *maxInvalid,
 		DedupeSeqs:   *dedupeSeqs,
 		DedupeIDs:    *dedupeIDs,
-		RequireRanks: splitList(*requireRanks),
+		RequireRanks: util.SplitList(*requireRanks),
 		TaxdumpDir:   *taxdumpDir,
 		TaxidMapPath: *taxidMap,
 		OutputPath:   *output,
@@ -255,7 +257,7 @@ func qcFasta(input string, cfg qcConfig) error {
 			return err
 		}
 	}
-	logf("qc: total=%d kept=%d drop taxid=%d ranks=%d short=%d long=%d n=%d ambig=%d invalid=%d dup-seq=%d dup-id=%d",
+	util.Logf("qc: total=%d kept=%d drop taxid=%d ranks=%d short=%d long=%d n=%d ambig=%d invalid=%d dup-seq=%d dup-id=%d",
 		stats.Total, stats.Written, stats.MissingTaxID, stats.MissingRanks, stats.TooShort, stats.TooLong, stats.TooManyN, stats.TooManyAmbig, stats.TooManyInvalid, stats.DupeSeq, stats.DupeID)
 	return nil
 }

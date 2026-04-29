@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 const (
@@ -167,7 +169,7 @@ func (c *bioscan5MCurator) writeReport() error {
 	if err := enc.Encode(report); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
-	logf("extract (%s): report -> %s", extractCurationProtocolBioscan5M, c.cfg.ReportPath)
+	util.Logf("extract (%s): report -> %s", extractCurationProtocolBioscan5M, c.cfg.ReportPath)
 	return nil
 }
 

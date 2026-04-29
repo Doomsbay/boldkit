@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 type formatConfig struct {
@@ -46,8 +48,8 @@ func runFormat(args []string) {
 		fatalf("input is required")
 	}
 	cfg := formatConfig{
-		Classifiers:  splitList(*classifiers),
-		RequireRanks: splitList(*requireRanks),
+		Classifiers:  util.SplitList(*classifiers),
+		RequireRanks: util.SplitList(*requireRanks),
 		Input:        *input,
 		OutDir:       *outDir,
 		TaxdumpDir:   *taxdumpDir,
@@ -227,7 +229,7 @@ func formatFasta(cfg formatConfig) error {
 			return err
 		}
 	}
-	logf("format: total=%d kept=%d missing-taxid=%d missing-ranks=%d", stats.Total, stats.Written, stats.MissingTaxID, stats.MissingRanks)
+	util.Logf("format: total=%d kept=%d missing-taxid=%d missing-ranks=%d", stats.Total, stats.Written, stats.MissingTaxID, stats.MissingRanks)
 	return nil
 }
 
@@ -300,7 +302,7 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 
 	// Log disambiguation count
 	if builder.disambiguatedCount() > 0 {
-		logf("rdp: disambiguated %d taxonomy names due to parent conflicts", builder.disambiguatedCount())
+		util.Logf("rdp: disambiguated %d taxonomy names due to parent conflicts", builder.disambiguatedCount())
 	}
 
 	// Write taxonomy file

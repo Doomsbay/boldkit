@@ -12,6 +12,8 @@ import (
 	"sync"
 
 	"github.com/klauspost/pgzip"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 type markerWriter struct {
@@ -111,9 +113,9 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 
 	err := ParseRows(inputPath, opts, func(row Row) error {
 		if idxProcess < 0 {
-			idxProcess = indexOfBytes(row.Fields, "processid")
-			idxMarker = indexOfBytes(row.Fields, "marker_code")
-			idxNuc = indexOfBytes(row.Fields, "nuc")
+			idxProcess = util.IndexOfBytes(row.Fields, "processid")
+			idxMarker = util.IndexOfBytes(row.Fields, "marker_code")
+			idxNuc = util.IndexOfBytes(row.Fields, "nuc")
 			if idxProcess < 0 || idxMarker < 0 || idxNuc < 0 {
 				return errors.New("required headers missing in input TSV")
 			}
@@ -122,31 +124,31 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 
 		fields := row.Fields
 		if idxProcess >= len(fields) || idxMarker >= len(fields) || idxNuc >= len(fields) {
-			return fmt.Errorf("line %d: expected at least %d fields", row.Line, maxIndex(idxProcess, idxMarker, idxNuc)+1)
+			return fmt.Errorf("line %d: expected at least %d fields", row.Line, util.MaxIndex(idxProcess, idxMarker, idxNuc)+1)
 		}
 
 		nuc := fields[idxNuc]
-		if len(nuc) == 0 || isNone(nuc) {
+		if len(nuc) == 0 || util.IsNull(nuc) {
 			return nil
 		}
 
 		seqBufPtr := seqPool.Get().(*[]byte)
 		seqBuf := *seqBufPtr
-		seq := filterSeqBytes(seqBuf, nuc)
+		seq := util.FilterSeqBytes(seqBuf, nuc)
 		if len(seq) == 0 {
 			*seqBufPtr = seq[:0]
 			seqPool.Put(seqBufPtr)
 			return nil
 		}
 
-		markerVal := normalizeBytes(fields[idxMarker])
+		markerVal := util.Normalize(fields[idxMarker])
 		if len(markerVal) == 0 {
 			markerVal = []byte("UNKNOWN")
 		}
 
 		markerScratchPtr := markerBufPool.Get().(*[]byte)
 		markerScratch := *markerScratchPtr
-		sanitizedMarker := sanitizeMarkerBytes(markerScratch, markerVal)
+		sanitizedMarker := util.SanitizeMarkerBytes(markerScratch, markerVal)
 		*markerScratchPtr = markerScratch[:0]
 		markerBufPool.Put(markerScratchPtr)
 

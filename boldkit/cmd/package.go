@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 type packageConfig struct {
@@ -60,7 +62,7 @@ func runPackage(args []string) {
 }
 
 func packageRelease(cfg packageConfig) error {
-	logf("Packaging release artifacts -> %s", cfg.ReleaseDir)
+	util.Logf("Packaging release artifacts -> %s", cfg.ReleaseDir)
 	if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
 		return fmt.Errorf("create releases dir: %w", err)
 	}
@@ -94,23 +96,23 @@ func packageRelease(cfg packageConfig) error {
 	markerZip := packageMarkerPath(markerDir, cfg.ReleaseDir, cfg.Snapshot)
 	taxdumpArchive := packageTaxdumpArchivePath(taxdumpDir, cfg.ReleaseDir, cfg.Snapshot)
 
-	logf("Package taxdump archive -> %s", taxdumpArchive)
+	util.Logf("Package taxdump archive -> %s", taxdumpArchive)
 	if err := packageDirGzip(taxdumpDir, taxdumpArchive, cfg.Force); err != nil {
 		return err
 	}
 
-	logf("Package marker archive -> %s", markerZip)
+	util.Logf("Package marker archive -> %s", markerZip)
 	if err := packageDirGzip(markerDir, markerZip, cfg.Force); err != nil {
 		return err
 	}
 
 	if !taxonkitIsGz {
-		logf("Package taxonkit input gzip -> %s", taxonkitGz)
+		util.Logf("Package taxonkit input gzip -> %s", taxonkitGz)
 		if err := packageTaxonkitGzip(taxonkitSource, taxonkitGz, cfg.Force); err != nil {
 			return err
 		}
 	} else if taxonkitSource != taxonkitGz {
-		logf("Package taxonkit input gzip -> %s", taxonkitGz)
+		util.Logf("Package taxonkit input gzip -> %s", taxonkitGz)
 		if err := copyFile(taxonkitSource, taxonkitGz); err != nil {
 			return err
 		}
@@ -118,7 +120,7 @@ func packageRelease(cfg packageConfig) error {
 
 	if !cfg.SkipManifest {
 		manifestPath := filepath.Join(cfg.ReleaseDir, "manifest.json")
-		logf("Write manifest -> %s", manifestPath)
+		util.Logf("Write manifest -> %s", manifestPath)
 		if err := writeManifest(manifestPath, taxdumpDir, markerDir, cfg.Snapshot, cfg.Force); err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
@@ -126,7 +128,7 @@ func packageRelease(cfg packageConfig) error {
 
 	if !cfg.SkipChecksums {
 		sumPath := filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt")
-		logf("Write checksums -> %s", sumPath)
+		util.Logf("Write checksums -> %s", sumPath)
 		if err := writeChecksums(cfg.ReleaseDir, sumPath, cfg.Force); err != nil {
 			return fmt.Errorf("checksums: %w", err)
 		}

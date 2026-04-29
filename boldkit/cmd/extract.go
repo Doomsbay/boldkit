@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 const writerBufferSize = 1 << 20
@@ -98,17 +100,17 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 
 	err = ParseRows(inputPath, opts, func(row Row) error {
 		if idxProcess < 0 {
-			idxProcess = indexOfBytes(row.Fields, "processid")
-			idxBin = indexOfBytes(row.Fields, "bin_uri")
-			idxKingdom = indexOfBytes(row.Fields, "kingdom")
-			idxPhylum = indexOfBytes(row.Fields, "phylum")
-			idxClass = indexOfBytes(row.Fields, "class")
-			idxOrder = indexOfBytes(row.Fields, "order")
-			idxFamily = indexOfBytes(row.Fields, "family")
-			idxSubfamily = indexOfBytes(row.Fields, "subfamily")
-			idxTribe = indexOfBytes(row.Fields, "tribe")
-			idxGenus = indexOfBytes(row.Fields, "genus")
-			idxSpecies = indexOfBytes(row.Fields, "species")
+			idxProcess = util.IndexOfBytes(row.Fields, "processid")
+			idxBin = util.IndexOfBytes(row.Fields, "bin_uri")
+			idxKingdom = util.IndexOfBytes(row.Fields, "kingdom")
+			idxPhylum = util.IndexOfBytes(row.Fields, "phylum")
+			idxClass = util.IndexOfBytes(row.Fields, "class")
+			idxOrder = util.IndexOfBytes(row.Fields, "order")
+			idxFamily = util.IndexOfBytes(row.Fields, "family")
+			idxSubfamily = util.IndexOfBytes(row.Fields, "subfamily")
+			idxTribe = util.IndexOfBytes(row.Fields, "tribe")
+			idxGenus = util.IndexOfBytes(row.Fields, "genus")
+			idxSpecies = util.IndexOfBytes(row.Fields, "species")
 			if idxProcess < 0 || idxBin < 0 || idxKingdom < 0 || idxPhylum < 0 || idxClass < 0 ||
 				idxOrder < 0 || idxFamily < 0 || idxGenus < 0 || idxSpecies < 0 {
 				return errors.New("required headers missing in input")
@@ -121,17 +123,17 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 		fields := row.Fields
 
 		record := extractTaxonRecord{
-			ProcessID: string(fieldBytes(fields, idxProcess)),
-			BinURI:    string(fieldBytes(fields, idxBin)),
-			Kingdom:   string(normalizeBytes(fieldBytes(fields, idxKingdom))),
-			Phylum:    string(normalizeBytes(fieldBytes(fields, idxPhylum))),
-			Class:     string(normalizeBytes(fieldBytes(fields, idxClass))),
-			Order:     string(normalizeBytes(fieldBytes(fields, idxOrder))),
-			Family:    string(normalizeBytes(fieldBytes(fields, idxFamily))),
-			Subfamily: string(normalizeBytes(fieldBytes(fields, idxSubfamily))),
-			Tribe:     string(normalizeBytes(fieldBytes(fields, idxTribe))),
-			Genus:     string(normalizeBytes(fieldBytes(fields, idxGenus))),
-			Species:   string(normalizeBytes(fieldBytes(fields, idxSpecies))),
+			ProcessID: string(util.Field(fields, idxProcess)),
+			BinURI:    string(util.Field(fields, idxBin)),
+			Kingdom:   string(util.Normalize(util.Field(fields, idxKingdom))),
+			Phylum:    string(util.Normalize(util.Field(fields, idxPhylum))),
+			Class:     string(util.Normalize(util.Field(fields, idxClass))),
+			Order:     string(util.Normalize(util.Field(fields, idxOrder))),
+			Family:    string(util.Normalize(util.Field(fields, idxFamily))),
+			Subfamily: string(util.Normalize(util.Field(fields, idxSubfamily))),
+			Tribe:     string(util.Normalize(util.Field(fields, idxTribe))),
+			Genus:     string(util.Normalize(util.Field(fields, idxGenus))),
+			Species:   string(util.Normalize(util.Field(fields, idxSpecies))),
 		}
 		if err := curator.Curate(&record); err != nil {
 			return fmt.Errorf("line %d curation failed: %w", rowCount+1, err)

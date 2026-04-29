@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 const (
@@ -106,8 +108,8 @@ func runSplit(args []string) {
 		fatalf("parse args failed: %v", err)
 	}
 
-	ranks := splitList(*requireRanks)
-	classifierList := splitList(*classifiers)
+	ranks := util.SplitList(*requireRanks)
+	classifierList := util.SplitList(*classifiers)
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
@@ -124,7 +126,7 @@ func runSplit(args []string) {
 	}
 
 	if *input == "" {
-		markerList := splitList(*markers)
+		markerList := util.SplitList(*markers)
 		if len(markerList) == 0 {
 			fatalf("input is empty and markers list is empty")
 		}
@@ -150,7 +152,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 	splitInput := input
 	if qcCfg.Enabled {
 		qcOut := filepath.Join(outDir, "qc", qcBaseName(input)+".fasta")
-		logf("split: QC -> %s", qcOut)
+		util.Logf("split: QC -> %s", qcOut)
 		if err := qcFasta(input, qcConfig{
 			MinLen:       qcCfg.MinLen,
 			MaxLen:       qcCfg.MaxLen,
@@ -204,7 +206,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 
 	seenTrain := filepath.Join(outDir, "seen_train.fasta")
 	formatOut := filepath.Join(outDir, "formatted")
-	logf("split: format references from %s -> %s", seenTrain, formatOut)
+	util.Logf("split: format references from %s -> %s", seenTrain, formatOut)
 	if err := formatFasta(formatConfig{
 		Classifiers:  classifiers,
 		RequireRanks: ranks,
@@ -217,8 +219,8 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 		return fmt.Errorf("format references: %w", err)
 	}
 
-	logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d heldout-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses, stats.HeldoutClasses)
-	logf("split: pruned taxdump -> %s (kept_taxids=%d)", prunedDir, keptTaxids)
+	util.Logf("split: records=%d classes=%d seen-classes=%d unseen-classes=%d heldout-classes=%d", stats.TotalRecords, stats.TotalClasses, stats.SeenClasses, stats.UnseenClasses, stats.HeldoutClasses)
+	util.Logf("split: pruned taxdump -> %s (kept_taxids=%d)", prunedDir, keptTaxids)
 	reportPath := filepath.Join(outDir, "split_report.json")
 	if err := writeSplitReport(reportPath, splitReport{
 		Input:       splitInput,
@@ -229,7 +231,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 	}); err != nil {
 		return err
 	}
-	logf("split: report -> %s", reportPath)
+	util.Logf("split: report -> %s", reportPath)
 	return nil
 }
 
@@ -282,8 +284,8 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 	err = ParseTSV(in, opts, func(row Row) error {
 		if !headerSeen {
 			headerSeen = true
-			idxProcess = indexOfBytes(row.Fields, "processid")
-			idxSpecies = indexOfBytes(row.Fields, "species")
+			idxProcess = util.IndexOfBytes(row.Fields, "processid")
+			idxSpecies = util.IndexOfBytes(row.Fields, "species")
 			if idxProcess < 0 || idxSpecies < 0 {
 				return fmt.Errorf("required headers missing in taxonkit input (need processid, species)")
 			}
@@ -291,7 +293,7 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 		}
 
 		if idxProcess >= len(row.Fields) || idxSpecies >= len(row.Fields) {
-			return fmt.Errorf("line %d: expected at least %d fields", row.Line, maxIndex(idxProcess, idxSpecies)+1)
+			return fmt.Errorf("line %d: expected at least %d fields", row.Line, util.MaxIndex(idxProcess, idxSpecies)+1)
 		}
 
 		pid := string(row.Fields[idxProcess])
@@ -302,7 +304,7 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 			return nil
 		}
 
-		if isNone(row.Fields[idxSpecies]) || len(row.Fields[idxSpecies]) == 0 {
+		if util.IsNull(row.Fields[idxSpecies]) || len(row.Fields[idxSpecies]) == 0 {
 			invalid[pid] = struct{}{}
 			return nil
 		}
@@ -331,7 +333,7 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 		return nil, nil, fmt.Errorf("taxonkit input has no matching process IDs for input FASTA: %s", path)
 	}
 	if len(invalid) > 0 {
-		logf("split: %d records missing species label (moved to %s)", len(invalid), bucketPretrain)
+		util.Logf("split: %d records missing species label (moved to %s)", len(invalid), bucketPretrain)
 	}
 	return labels, invalid, nil
 }
@@ -427,7 +429,7 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 	}
 
 	if len(conflicted) > 0 {
-		logf("split: %d barcode groups span multiple species labels (moved to %s)", len(conflicted), bucketPretrain)
+		util.Logf("split: %d barcode groups span multiple species labels (moved to %s)", len(conflicted), bucketPretrain)
 	}
 
 	return splitPlan{

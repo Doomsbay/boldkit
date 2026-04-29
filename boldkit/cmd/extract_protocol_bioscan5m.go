@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 type bioscan5MCurator struct {
@@ -49,18 +51,18 @@ func (c *bioscan5MCurator) prime(inputPath string) error {
 
 	err := ParseRows(inputPath, opts, func(row Row) error {
 		if idxBin < 0 {
-			idxBin = indexOfBytes(row.Fields, "bin_uri")
-			idxGenus = indexOfBytes(row.Fields, "genus")
-			idxSpecies = indexOfBytes(row.Fields, "species")
+			idxBin = util.IndexOfBytes(row.Fields, "bin_uri")
+			idxGenus = util.IndexOfBytes(row.Fields, "genus")
+			idxSpecies = util.IndexOfBytes(row.Fields, "species")
 			if idxBin < 0 || idxGenus < 0 || idxSpecies < 0 {
 				return fmt.Errorf("required headers missing in input (bin_uri, genus, species)")
 			}
 			return nil
 		}
 
-		binURI := bioscanNormalizeLabel(string(fieldBytes(row.Fields, idxBin)))
-		genus := bioscanNormalizeLabel(string(fieldBytes(row.Fields, idxGenus)))
-		species := bioscanNormalizeLabel(string(fieldBytes(row.Fields, idxSpecies)))
+		binURI := bioscanNormalizeLabel(string(util.Field(row.Fields, idxBin)))
+		genus := bioscanNormalizeLabel(string(util.Field(row.Fields, idxGenus)))
+		species := bioscanNormalizeLabel(string(util.Field(row.Fields, idxSpecies)))
 		c.resolver.Observe(binURI, genus, species)
 		return nil
 	})
@@ -212,7 +214,7 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 }
 
 func (c *bioscan5MCurator) Close() error {
-	logf("extract (%s): bins-observed=%d bins-canonical=%d bins-conflicted=%d", extractCurationProtocolBioscan5M, c.binsObserved, c.binsCanonical, c.binsConflicted)
+	util.Logf("extract (%s): bins-observed=%d bins-canonical=%d bins-conflicted=%d", extractCurationProtocolBioscan5M, c.binsObserved, c.binsCanonical, c.binsConflicted)
 	var firstErr error
 	if err := c.writeReport(); err != nil && firstErr == nil {
 		firstErr = err

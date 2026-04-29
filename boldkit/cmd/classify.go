@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
 func runClassify(args []string) {
@@ -33,14 +35,14 @@ func runClassify(args []string) {
 		fatalf("parse args failed: %v", err)
 	}
 
-	ranks := splitList(*requireRanks)
-	classifierList := splitList(*classifiers)
+	ranks := util.SplitList(*requireRanks)
+	classifierList := util.SplitList(*classifiers)
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
 
 	if *input == "" {
-		markerList := splitList(*markers)
+		markerList := util.SplitList(*markers)
 		if len(markerList) == 0 {
 			fatalf("input is empty and markers list is empty")
 		}
@@ -80,7 +82,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 		Progress:     qcProgress,
 	}
 
-	logf("QC -> %s", qcOut)
+	util.Logf("QC -> %s", qcOut)
 	if err := qcFasta(input, qcCfg); err != nil {
 		return fmt.Errorf("qc failed: %w", err)
 	}
@@ -104,7 +106,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 			TaxidMapPath: taxidMap,
 			Progress:     formatProgress,
 		}
-		logf("Format %s -> %s", name, outPath)
+		util.Logf("Format %s -> %s", name, outPath)
 		if err := formatFasta(cfg); err != nil {
 			return fmt.Errorf("format %s failed: %w", name, err)
 		}
