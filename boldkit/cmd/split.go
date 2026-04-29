@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -236,7 +237,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 }
 
 func collectFastaIDs(input string) (map[string]struct{}, error) {
-	in, err := openInput(input)
+	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return nil, fmt.Errorf("open input: %w", err)
 	}
@@ -245,14 +246,14 @@ func collectFastaIDs(input string) (map[string]struct{}, error) {
 	}()
 
 	ids := make(map[string]struct{}, 1<<20)
-	err = parseFasta(in, func(rec fastaRecord) error {
-		if rec.id == "" {
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
+		if rec.ID == "" {
 			return fmt.Errorf("found FASTA record with empty ID")
 		}
-		if _, dup := ids[rec.id]; dup {
-			return fmt.Errorf("duplicate processid in input FASTA: %s", rec.id)
+		if _, dup := ids[rec.ID]; dup {
+			return fmt.Errorf("duplicate processid in input FASTA: %s", rec.ID)
 		}
-		ids[rec.id] = struct{}{}
+		ids[rec.ID] = struct{}{}
 		return nil
 	})
 	if err != nil {
@@ -265,7 +266,7 @@ func collectFastaIDs(input string) (map[string]struct{}, error) {
 }
 
 func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string]string, map[string]struct{}, error) {
-	in, err := openInput(path)
+	in, err := boldio.OpenInput(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open taxonkit input: %w", err)
 	}
@@ -273,7 +274,7 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 		_ = in.Close()
 	}()
 
-	opts := DefaultOptions()
+	opts := boldio.DefaultOptions()
 	headerSeen := false
 	idxProcess := -1
 	idxSpecies := -1
@@ -281,7 +282,7 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 	invalid := make(map[string]struct{})
 	found := 0
 
-	err = ParseTSV(in, opts, func(row Row) error {
+	err = boldio.ParseTSV(in, opts, func(row boldio.Row) error {
 		if !headerSeen {
 			headerSeen = true
 			idxProcess = util.IndexOfBytes(row.Fields, "processid")
@@ -339,7 +340,7 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 }
 
 func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}) (splitPlan, splitStats, error) {
-	in, err := openInput(input)
+	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return splitPlan{}, splitStats{}, fmt.Errorf("open input: %w", err)
 	}
@@ -350,18 +351,18 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 	barcodeGroups := make(map[[16]byte]barcodeGroup, 1<<20)
 	stats := splitStats{}
 
-	err = parseFasta(in, func(rec fastaRecord) error {
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		stats.TotalRecords++
-		if _, bad := invalidIDs[rec.id]; bad {
+		if _, bad := invalidIDs[rec.ID]; bad {
 			return nil
 		}
-		label, ok := labels[rec.id]
+		label, ok := labels[rec.ID]
 		if !ok {
-			invalidIDs[rec.id] = struct{}{}
+			invalidIDs[rec.ID] = struct{}{}
 			return nil
 		}
 
-		hash := md5.Sum(rec.seq)
+		hash := md5.Sum(rec.Seq)
 		group := barcodeGroups[hash]
 		if group.count == 0 {
 			group.label = label
@@ -499,7 +500,7 @@ func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]st
 		}
 	}()
 
-	in, err := openInput(input)
+	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open input: %w", err)
 	}
@@ -509,11 +510,11 @@ func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]st
 
 	counts := make(map[string]int)
 	seenTrainIDs := make(map[string]struct{})
-	err = parseFasta(in, func(rec fastaRecord) error {
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		bucket := bucketPretrain
-		if _, bad := plan.invalidIDs[rec.id]; !bad {
-			if _, ok := labels[rec.id]; ok {
-				hash := md5.Sum(rec.seq)
+		if _, bad := plan.invalidIDs[rec.ID]; !bad {
+			if _, ok := labels[rec.ID]; ok {
+				hash := md5.Sum(rec.Seq)
 				if _, conflict := plan.conflicted[hash]; !conflict {
 					if mapped, ok := plan.seqBucket[hash]; ok {
 						bucket = mapped
@@ -526,12 +527,12 @@ func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]st
 		if !ok {
 			return fmt.Errorf("unknown split bucket %s", bucket)
 		}
-		if err := writeFasta(w.buf, rec.id, rec.seq); err != nil {
+		if err := boldio.WriteFasta(w.buf, rec.ID, rec.Seq); err != nil {
 			return err
 		}
 		counts[bucket]++
 		if bucket == bucketSeenTrain {
-			seenTrainIDs[rec.id] = struct{}{}
+			seenTrainIDs[rec.ID] = struct{}{}
 		}
 		return nil
 	})

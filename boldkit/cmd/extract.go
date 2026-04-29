@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -34,14 +35,14 @@ func runExtract(args []string) {
 		fatalf("invalid extraction curation config: %v", err)
 	}
 
-	if !*force && fileExists(*output) {
+	if !*force && boldio.FileExists(*output) {
 		fmt.Fprintf(os.Stderr, "Output exists, skipping: %s\n", *output)
 		return
 	}
 
 	totalRows := -1
 	if *progressOn {
-		count, err := RowCount(*input)
+		count, err := boldio.RowCount(*input)
 		if err != nil {
 			fatalf("count rows failed: %v", err)
 		}
@@ -79,7 +80,7 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 
 	progress := newProgress(totalRows, reportEvery)
 
-	opts := DefaultOptions()
+	opts := boldio.DefaultOptions()
 	opts.Progress = progress
 	opts.SkipProgressFirstRow = true
 
@@ -98,7 +99,7 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 		idxSpecies   = -1
 	)
 
-	err = ParseRows(inputPath, opts, func(row Row) error {
+	err = boldio.ParseRows(inputPath, opts, func(row boldio.Row) error {
 		if idxProcess < 0 {
 			idxProcess = util.IndexOfBytes(row.Fields, "processid")
 			idxBin = util.IndexOfBytes(row.Fields, "bin_uri")
@@ -163,7 +164,7 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 		return 0, err
 	}
 
-	progress.finish()
+	progress.Finish()
 	if err := curator.Close(); err != nil {
 		return 0, fmt.Errorf("finalize curation profile: %w", err)
 	}

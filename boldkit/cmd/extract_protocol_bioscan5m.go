@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -42,14 +43,14 @@ func newExtractBioscan5MCurator(cfg extractCurationConfig, inputPath string) (ex
 }
 
 func (c *bioscan5MCurator) prime(inputPath string) error {
-	opts := DefaultOptions()
+	opts := boldio.DefaultOptions()
 	var (
 		idxBin     = -1
 		idxGenus   = -1
 		idxSpecies = -1
 	)
 
-	err := ParseRows(inputPath, opts, func(row Row) error {
+	err := boldio.ParseRows(inputPath, opts, func(row boldio.Row) error {
 		if idxBin < 0 {
 			idxBin = util.IndexOfBytes(row.Fields, "bin_uri")
 			idxGenus = util.IndexOfBytes(row.Fields, "genus")

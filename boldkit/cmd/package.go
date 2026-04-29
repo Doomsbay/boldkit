@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -97,12 +96,12 @@ func packageRelease(cfg packageConfig) error {
 	taxdumpArchive := packageTaxdumpArchivePath(taxdumpDir, cfg.ReleaseDir, cfg.Snapshot)
 
 	util.Logf("Package taxdump archive -> %s", taxdumpArchive)
-	if err := packageDirGzip(taxdumpDir, taxdumpArchive, cfg.Force); err != nil {
+	if err := boldio.PackageDirGzip(taxdumpDir, taxdumpArchive, cfg.Force); err != nil {
 		return err
 	}
 
 	util.Logf("Package marker archive -> %s", markerZip)
-	if err := packageDirGzip(markerDir, markerZip, cfg.Force); err != nil {
+	if err := boldio.PackageDirGzip(markerDir, markerZip, cfg.Force); err != nil {
 		return err
 	}
 
@@ -113,7 +112,7 @@ func packageRelease(cfg packageConfig) error {
 		}
 	} else if taxonkitSource != taxonkitGz {
 		util.Logf("Package taxonkit input gzip -> %s", taxonkitGz)
-		if err := copyFile(taxonkitSource, taxonkitGz); err != nil {
+		if err := boldio.CopyFile(taxonkitSource, taxonkitGz); err != nil {
 			return err
 		}
 	}
@@ -163,7 +162,7 @@ func movePath(src, dest string, force bool) error {
 	if filepath.Clean(src) == filepath.Clean(dest) {
 		return nil
 	}
-	if pathExists(dest) {
+	if boldio.PathExists(dest) {
 		if !force {
 			return fmt.Errorf("destination exists (use --force): %s", dest)
 		}
@@ -183,55 +182,13 @@ func movePath(src, dest string, force bool) error {
 		return fmt.Errorf("stat %s: %w", src, err)
 	}
 	if info.IsDir() {
-		if err := copyDir(src, dest); err != nil {
+		if err := boldio.CopyDir(src, dest); err != nil {
 			return err
 		}
 	} else {
-		if err := copyFile(src, dest); err != nil {
+		if err := boldio.CopyFile(src, dest); err != nil {
 			return err
 		}
 	}
 	return os.RemoveAll(src)
-}
-
-func copyDir(src, dest string) error {
-	info, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", src, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", src)
-	}
-	if err := os.MkdirAll(dest, info.Mode().Perm()); err != nil {
-		return fmt.Errorf("create dir %s: %w", dest, err)
-	}
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		target := filepath.Join(dest, rel)
-		if d.IsDir() {
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return errors.New("symlinks not supported in move fallback")
-		}
-		return copyFile(path, target)
-	})
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

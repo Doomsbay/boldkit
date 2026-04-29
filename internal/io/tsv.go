@@ -1,4 +1,4 @@
-package cmd
+package io
 
 import (
 	"bufio"
@@ -11,29 +11,31 @@ import (
 	"time"
 )
 
+type Progress interface {
+	Increment()
+	Finish()
+}
+
 const (
-	defaultBufferSize = 1 << 20 // 1 MiB
-	defaultChunkSize  = 8 << 20 // 8 MiB
+	defaultBufferSize = 1 << 20
+	defaultChunkSize  = 8 << 20
 	defaultBatchLines = 1024
 )
 
-// Options controls TSV parsing performance characteristics.
 type Options struct {
-	BufferSize           int  // Size of the bufio.Reader buffer
-	ChunkSize            int  // Bytes to read per chunk before splitting into lines
-	BatchLines           int  // How many lines to hand to a worker at once
-	Workers              int  // Number of parsing workers
-	StrictColumns        bool // Enforce a fixed column count (first row if ExpectedColumns == 0)
-	ExpectedColumns      int  // Expected column count when StrictColumns is true (0 to infer from first row)
-	PreserveOrder        bool // Deliver rows in file order
-	AllowCRLF            bool // Trim trailing \r when present
-	Progress             *progress
+	BufferSize           int
+	ChunkSize            int
+	BatchLines           int
+	Workers              int
+	StrictColumns        bool
+	ExpectedColumns      int
+	PreserveOrder        bool
+	AllowCRLF            bool
+	Progress             Progress
 	SkipProgressFirstRow bool
 	Timeout              time.Duration
 }
 
-// Row is a view over a TSV line. Fields point into an internal buffer and are
-// only valid for the duration of the callback in ParseTSV.
 type Row struct {
 	Line   int64
 	Fields [][]byte
@@ -76,7 +78,6 @@ type parseResult struct {
 	buf  *bufferRef
 }
 
-// DefaultOptions returns a tuned baseline for large TSVs.
 func DefaultOptions() Options {
 	return Options{
 		BufferSize:    defaultBufferSize,
@@ -88,13 +89,11 @@ func DefaultOptions() Options {
 	}
 }
 
-// WithPreserveOrder overrides the default ordering behavior.
 func (o Options) WithPreserveOrder(preserve bool) Options {
 	o.PreserveOrder = preserve
 	return o
 }
 
-// WithAllowCRLF toggles CRLF stripping (default: enabled).
 func (o Options) WithAllowCRLF(allow bool) Options {
 	o.AllowCRLF = allow
 	return o
@@ -116,8 +115,6 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// ParseTSV streams a TSV from r, invoking onRow for each line. It keeps memory
-// bounded by reusing chunk buffers; row data is only valid inside onRow.
 func ParseTSV(r io.Reader, opts Options, onRow func(Row) error) error {
 	opts = opts.withDefaults()
 
@@ -180,9 +177,6 @@ func ParseTSV(r io.Reader, opts Options, onRow func(Row) error) error {
 	return nil
 }
 
-// ParseTSVChan exposes rows over a channel. Rows are copied to keep the channel
-// consumer safe from buffer reuse. Errors are sent on errCh after the rows
-// channel closes.
 func ParseTSVChan(ctx context.Context, r io.Reader, opts Options) (<-chan Row, <-chan error) {
 	opts = opts.withDefaults()
 
@@ -401,7 +395,7 @@ func consumeResults(ctx context.Context, opts Options, results <-chan parseResul
 			}
 			if opts.Progress != nil {
 				if !opts.SkipProgressFirstRow || rowsSeen != 0 {
-					opts.Progress.increment()
+					opts.Progress.Increment()
 				}
 			}
 			rowsSeen++
@@ -461,7 +455,6 @@ func consumeResults(ctx context.Context, opts Options, results <-chan parseResul
 }
 
 func splitFields(line []byte, expected int) [][]byte {
-	// expected guides capacity to reduce slice growth.
 	capacity := expected
 	if capacity == 0 {
 		capacity = 8

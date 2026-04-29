@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -99,7 +100,7 @@ func runQC(args []string) {
 }
 
 func qcFasta(input string, cfg qcConfig) error {
-	in, counter, err := openInputWithCounter(input)
+	in, counter, err := boldio.OpenInputWithCounter(input)
 	if err != nil {
 		return fmt.Errorf("open input: %w", err)
 	}
@@ -110,7 +111,7 @@ func qcFasta(input string, cfg qcConfig) error {
 	var bar *byteProgress
 	var lastCount int64
 	if cfg.Progress {
-		total := fileSize(input)
+		total := boldio.FileSize(input)
 		bar = newByteProgress(total, "qc (approx)")
 	}
 
@@ -154,26 +155,26 @@ func qcFasta(input string, cfg qcConfig) error {
 	seenSeqs := make(map[string]struct{})
 	seenIDs := make(map[string]struct{})
 
-	err = parseFasta(in, func(rec fastaRecord) error {
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		stats.Total++
-		if rec.id == "" {
+		if rec.ID == "" {
 			stats.MissingTaxID++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
 		if cfg.DedupeIDs {
-			if _, ok := seenIDs[rec.id]; ok {
+			if _, ok := seenIDs[rec.ID]; ok {
 				stats.DupeID++
 				updateByteProgress(bar, counter, &lastCount)
 				return nil
 			}
-			seenIDs[rec.id] = struct{}{}
+			seenIDs[rec.ID] = struct{}{}
 		}
 
 		var taxid int
 		if taxidMap != nil {
 			var ok bool
-			taxid, ok = taxidMap[rec.id]
+			taxid, ok = taxidMap[rec.ID]
 			if !ok {
 				stats.MissingTaxID++
 				updateByteProgress(bar, counter, &lastCount)
@@ -190,7 +191,7 @@ func qcFasta(input string, cfg qcConfig) error {
 			}
 		}
 
-		clean, counts := cleanSequence(rec.seq)
+		clean, counts := cleanSequence(rec.Seq)
 		if len(clean) == 0 {
 			stats.TooShort++
 			updateByteProgress(bar, counter, &lastCount)
@@ -231,7 +232,7 @@ func qcFasta(input string, cfg qcConfig) error {
 			seenSeqs[key] = struct{}{}
 		}
 
-		if _, err := writer.WriteString(">" + rec.id + "\n"); err != nil {
+		if _, err := writer.WriteString(">" + rec.ID + "\n"); err != nil {
 			return fmt.Errorf("write header: %w", err)
 		}
 		if _, err := writer.Write(clean); err != nil {

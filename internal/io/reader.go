@@ -1,27 +1,27 @@
-package cmd
+package io
 
 import (
 	"path/filepath"
 	"strings"
 )
 
-func isParquetPath(path string) bool {
+func IsParquetPath(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".parquet" || ext == ".parq"
 }
 
 func ParseRows(path string, opts Options, onRow func(Row) error) error {
-	if isParquetPath(path) {
+	if IsParquetPath(path) {
 		return parseParquet(path, opts, onRow)
 	}
 	return parseTSVRows(path, opts, onRow)
 }
 
 func RowCount(path string) (int64, error) {
-	if isParquetPath(path) {
+	if IsParquetPath(path) {
 		return parquetRowCount(path)
 	}
-	n, err := countLines(path)
+	n, err := CountLines(path)
 	if err != nil {
 		return 0, err
 	}
@@ -32,7 +32,7 @@ func RowCount(path string) (int64, error) {
 }
 
 func InputFormat(path string) string {
-	if isParquetPath(path) {
+	if IsParquetPath(path) {
 		return "parquet"
 	}
 	return "tsv"

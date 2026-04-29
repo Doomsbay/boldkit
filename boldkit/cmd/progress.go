@@ -4,10 +4,10 @@ import (
 	"os"
 	"time"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/schollz/progressbar/v3"
 )
 
-// progress wraps schollz/progressbar with an opt-out flag (reportEvery == 0).
 type progress struct {
 	bar *progressbar.ProgressBar
 }
@@ -44,14 +44,14 @@ func newProgress(total, reportEvery int) *progress {
 	return &progress{bar: bar}
 }
 
-func (p *progress) increment() {
+func (p *progress) Increment() {
 	if p.bar == nil {
 		return
 	}
 	_ = p.bar.Add(1)
 }
 
-func (p *progress) finish() {
+func (p *progress) Finish() {
 	if p.bar == nil {
 		return
 	}
@@ -104,7 +104,7 @@ func (b *byteProgress) Finish() {
 	_ = b.bar.Finish()
 }
 
-func updateByteProgress(bar *byteProgress, counter *countReader, last *int64) {
+func updateByteProgress(bar *byteProgress, counter *boldio.CountReader, last *int64) {
 	if bar == nil || counter == nil || last == nil {
 		return
 	}

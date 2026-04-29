@@ -12,6 +12,8 @@ import (
 	"github.com/apache/arrow/go/v18/parquet"
 	"github.com/apache/arrow/go/v18/parquet/compress"
 	"github.com/apache/arrow/go/v18/parquet/pqarrow"
+
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 )
 
 func TestParquetRowCount(t *testing.T) {
@@ -56,7 +58,7 @@ func TestParquetRowCount(t *testing.T) {
 	}
 	_ = f.Close()
 
-	count, err := parquetRowCount(path)
+	count, err := boldio.RowCount(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +73,7 @@ func TestParquetReadsRealFile(t *testing.T) {
 		t.Skip("skipping: real BOLD parquet file not present")
 	}
 
-	count, err := parquetRowCount(realFile)
+	count, err := boldio.RowCount(realFile)
 	if err != nil {
 		t.Fatalf("parquetRowCount: %v", err)
 	}
@@ -79,11 +81,11 @@ func TestParquetReadsRealFile(t *testing.T) {
 		t.Fatalf("expected positive row count, got %d", count)
 	}
 
-	opts := DefaultOptions()
+	opts := boldio.DefaultOptions()
 	headerSeen := false
 	dataRows := int64(0)
 
-	err = ParseRows(realFile, opts, func(row Row) error {
+	err = boldio.ParseRows(realFile, opts, func(row boldio.Row) error {
 		if !headerSeen {
 			headerSeen = true
 			hasProcessID := false
@@ -129,9 +131,9 @@ func TestIsParquetPath(t *testing.T) {
 		{"data.csv", false},
 	}
 	for _, tt := range tests {
-		got := isParquetPath(tt.path)
+		got := boldio.IsParquetPath(tt.path)
 		if got != tt.want {
-			t.Errorf("isParquetPath(%q) = %v, want %v", tt.path, got, tt.want)
+			t.Errorf("IsParquetPath(%q) = %v, want %v", tt.path, got, tt.want)
 		}
 	}
 }

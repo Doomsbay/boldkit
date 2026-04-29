@@ -1,11 +1,8 @@
 package cmd
 
 import (
-	"archive/tar"
 	"bufio"
 	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -18,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -59,7 +57,7 @@ func runPipeline(args []string) {
 
 	totalRows := -1
 	if *progressOn {
-		count, err := RowCount(*input)
+		count, err := boldio.RowCount(*input)
 		if err != nil {
 			fatalf("count rows failed: %v", err)
 		}
@@ -77,9 +75,9 @@ func runPipeline(args []string) {
 }
 
 func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extractCurationConfig) error {
-	util.Logf("Input format: %s", InputFormat(input))
+	util.Logf("Input format: %s", boldio.InputFormat(input))
 	util.Logf("Extract taxonomy -> %s", taxonkitOut)
-	if fileExists(taxonkitOut) && !force {
+	if boldio.FileExists(taxonkitOut) && !force {
 		util.Logf("taxonkit TSV exists, skipping (use --force to overwrite): %s", taxonkitOut)
 	} else {
 		if _, err := buildTaxonkit(input, taxonkitOut, reportEvery, totalRows, extractCfg); err != nil {
@@ -134,7 +132,7 @@ func runTaxonkitCreate(bin, input, outputDir string, force bool) error {
 		}
 	}
 
-	if !force && fileExists(filepath.Join(outputDir, "nodes.dmp")) && fileExists(filepath.Join(outputDir, "names.dmp")) && fileExists(filepath.Join(outputDir, "taxid.map")) {
+	if !force && boldio.FileExists(filepath.Join(outputDir, "nodes.dmp")) && boldio.FileExists(filepath.Join(outputDir, "names.dmp")) && boldio.FileExists(filepath.Join(outputDir, "taxid.map")) {
 		util.Logf("taxdump exists, skipping (use --force to overwrite): %s", outputDir)
 		return nil
 	}
@@ -195,7 +193,7 @@ func packageTaxonkitGzip(src, dest string, force bool) error {
 		util.Logf("taxonkit gzip already in release dir: %s", dest)
 		return nil
 	}
-	if fileExists(dest) && !force {
+	if boldio.FileExists(dest) && !force {
 		util.Logf("taxonkit gzip exists, skipping (use --force to overwrite): %s", dest)
 		return nil
 	}
@@ -203,7 +201,7 @@ func packageTaxonkitGzip(src, dest string, force bool) error {
 		return fmt.Errorf("create release dir: %w", err)
 	}
 	if strings.HasSuffix(src, ".gz") {
-		return copyFile(src, dest)
+		return boldio.CopyFile(src, dest)
 	}
 
 	in, err := os.Open(src)
@@ -236,101 +234,8 @@ func packageTaxonkitGzip(src, dest string, force bool) error {
 	return nil
 }
 
-func copyFile(src, dest string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", src, err)
-	}
-	defer func() {
-		_ = in.Close()
-	}()
-
-	out, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", dest, err)
-	}
-	defer func() {
-		_ = out.Close()
-	}()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return fmt.Errorf("copy %s: %w", src, err)
-	}
-	return nil
-}
-
-func packageDirGzip(srcDir, destTarGz string, force bool) error {
-	if fileExists(destTarGz) && !force {
-		util.Logf("archive exists, skipping (use --force to overwrite): %s", destTarGz)
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(destTarGz), 0o755); err != nil {
-		return fmt.Errorf("create releases dir: %w", err)
-	}
-
-	out, err := os.Create(destTarGz)
-	if err != nil {
-		return fmt.Errorf("create archive: %w", err)
-	}
-	defer func() {
-		_ = out.Close()
-	}()
-
-	gzw, err := gzip.NewWriterLevel(out, gzip.BestSpeed)
-	if err != nil {
-		return fmt.Errorf("create gzip writer: %w", err)
-	}
-	tw := tar.NewWriter(gzw)
-
-	base := filepath.Base(srcDir)
-	if err := filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		hdr, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		hdr.Name = filepath.ToSlash(filepath.Join(base, rel))
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(tw, in)
-		_ = in.Close()
-		return err
-	}); err != nil {
-		_ = tw.Close()
-		_ = gzw.Close()
-		return err
-	}
-
-	if err := tw.Close(); err != nil {
-		_ = gzw.Close()
-		return err
-	}
-	if err := gzw.Close(); err != nil {
-		return err
-	}
-	return nil
-}
-
 func writeChecksums(releaseDir, outputFile string, force bool) error {
-	if fileExists(outputFile) && !force {
+	if boldio.FileExists(outputFile) && !force {
 		util.Logf("checksums exist, skipping (use --force to overwrite): %s", outputFile)
 		return nil
 	}
@@ -364,7 +269,7 @@ func writeChecksums(releaseDir, outputFile string, force bool) error {
 	}()
 
 	for _, f := range files {
-		sum, err := sha256File(f)
+		sum, err := boldio.SHA256File(f)
 		if err != nil {
 			return err
 		}
@@ -375,24 +280,8 @@ func writeChecksums(releaseDir, outputFile string, force bool) error {
 	return nil
 }
 
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 func writeManifest(path, taxdumpDir, markerDir, snapshot string, force bool) error {
-	if fileExists(path) && !force {
+	if boldio.FileExists(path) && !force {
 		util.Logf("manifest exists, skipping (use --force to overwrite): %s", path)
 		return nil
 	}
@@ -406,15 +295,15 @@ func writeManifest(path, taxdumpDir, markerDir, snapshot string, force bool) err
 		commit = c
 	}
 
-	nodes, err := countLines(filepath.Join(taxdumpDir, "nodes.dmp"))
+	nodes, err := boldio.CountLines(filepath.Join(taxdumpDir, "nodes.dmp"))
 	if err != nil {
 		return err
 	}
-	names, err := countLines(filepath.Join(taxdumpDir, "names.dmp"))
+	names, err := boldio.CountLines(filepath.Join(taxdumpDir, "names.dmp"))
 	if err != nil {
 		return err
 	}
-	taxid, err := countLines(filepath.Join(taxdumpDir, "taxid.map"))
+	taxid, err := boldio.CountLines(filepath.Join(taxdumpDir, "taxid.map"))
 	if err != nil {
 		return err
 	}
@@ -485,7 +374,7 @@ func listMarkerFiles(markerDir string) ([]string, error) {
 func countMarkerSeqs(paths []string) (int, error) {
 	total := 0
 	for _, p := range paths {
-		rc, err := openInput(p)
+		rc, err := boldio.OpenInput(p)
 		if err != nil {
 			return 0, fmt.Errorf("open %s: %w", p, err)
 		}

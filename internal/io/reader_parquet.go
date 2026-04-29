@@ -1,4 +1,4 @@
-package cmd
+package io
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func parseParquet(path string, opts Options, onRow func(Row) error) error {
 			}
 			if opts.Progress != nil {
 				if !opts.SkipProgressFirstRow || lineNum != 1 {
-					opts.Progress.increment()
+					opts.Progress.Increment()
 				}
 			}
 			if err := onRow(Row{Line: lineNum, Fields: fields}); err != nil {

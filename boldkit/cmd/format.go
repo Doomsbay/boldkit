@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -84,7 +85,7 @@ type formatWriters struct {
 }
 
 func formatFasta(cfg formatConfig) error {
-	in, counter, err := openInputWithCounter(cfg.Input)
+	in, counter, err := boldio.OpenInputWithCounter(cfg.Input)
 	if err != nil {
 		return fmt.Errorf("open input: %w", err)
 	}
@@ -95,7 +96,7 @@ func formatFasta(cfg formatConfig) error {
 	var bar *byteProgress
 	var lastCount int64
 	if cfg.Progress {
-		total := fileSize(cfg.Input)
+		total := boldio.FileSize(cfg.Input)
 		bar = newByteProgress(total, "format (approx)")
 	}
 
@@ -126,14 +127,14 @@ func formatFasta(cfg formatConfig) error {
 	defer closeFormatWriters(writers)
 
 	stats := formatStats{}
-	err = parseFasta(in, func(rec fastaRecord) error {
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		stats.Total++
-		if rec.id == "" {
+		if rec.ID == "" {
 			stats.MissingTaxID++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
-		taxid, ok := taxidMap[rec.id]
+		taxid, ok := taxidMap[rec.ID]
 		if !ok {
 			stats.MissingTaxID++
 			updateByteProgress(bar, counter, &lastCount)
@@ -152,50 +153,49 @@ func formatFasta(cfg formatConfig) error {
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
-		seq := rec.seq
+		seq := rec.Seq
 
 		if writers.blastFasta.w != nil {
-			if err := writeFasta(writers.blastFasta.w, rec.id, seq); err != nil {
+			if err := boldio.WriteFasta(writers.blastFasta.w, rec.ID, seq); err != nil {
 				return err
 			}
 		}
 		if writers.blastMap.w != nil {
-			if _, err := writers.blastMap.w.WriteString(rec.id + "\t" + strconv.Itoa(taxid) + "\n"); err != nil {
+			if _, err := writers.blastMap.w.WriteString(rec.ID + "\t" + strconv.Itoa(taxid) + "\n"); err != nil {
 				return fmt.Errorf("write blast map: %w", err)
 			}
 		}
 		if writers.krakenFasta.w != nil {
-			header := rec.id + "|kraken:taxid|" + strconv.Itoa(taxid)
-			if err := writeFasta(writers.krakenFasta.w, header, seq); err != nil {
+			header := rec.ID + "|kraken:taxid|" + strconv.Itoa(taxid)
+			if err := boldio.WriteFasta(writers.krakenFasta.w, header, seq); err != nil {
 				return err
 			}
 		}
 		if writers.sintaxFasta.w != nil {
-			header := rec.id + ";tax=" + sintaxLineage(names)
-			if err := writeFasta(writers.sintaxFasta.w, header, seq); err != nil {
+			header := rec.ID + ";tax=" + sintaxLineage(names)
+			if err := boldio.WriteFasta(writers.sintaxFasta.w, header, seq); err != nil {
 				return err
 			}
 		}
-		// RDP is handled separately in formatFastaRdp
 		if writers.idtaxaFasta.w != nil {
-			if err := writeFasta(writers.idtaxaFasta.w, rec.id, seq); err != nil {
+			if err := boldio.WriteFasta(writers.idtaxaFasta.w, rec.ID, seq); err != nil {
 				return err
 			}
 		}
 		if writers.idtaxaLineage.w != nil {
 			lineageStr := "Root;" + strings.Join(names, ";")
-			if _, err := writers.idtaxaLineage.w.WriteString(rec.id + "\t" + lineageStr + "\n"); err != nil {
+			if _, err := writers.idtaxaLineage.w.WriteString(rec.ID + "\t" + lineageStr + "\n"); err != nil {
 				return fmt.Errorf("write idtaxa lineage: %w", err)
 			}
 		}
 		if writers.protaxFasta.w != nil {
-			if err := writeFasta(writers.protaxFasta.w, rec.id, seq); err != nil {
+			if err := boldio.WriteFasta(writers.protaxFasta.w, rec.ID, seq); err != nil {
 				return err
 			}
 		}
 		if writers.protaxMap.w != nil {
 			lineageStr := strings.Join(names, ";")
-			if _, err := writers.protaxMap.w.WriteString(rec.id + "\t" + lineageStr + "\n"); err != nil {
+			if _, err := writers.protaxMap.w.WriteString(rec.ID + "\t" + lineageStr + "\n"); err != nil {
 				return fmt.Errorf("write protax map: %w", err)
 			}
 		}
@@ -212,7 +212,6 @@ func formatFasta(cfg formatConfig) error {
 		bar.Finish()
 	}
 
-	// Handle RDP separately with two-pass approach
 	if writers.rdpTrainFasta.w != nil {
 		if err := formatFastaRdp(cfg, taxidMap, dump, writers); err != nil {
 			return fmt.Errorf("rdp format: %w", err)
@@ -233,9 +232,7 @@ func formatFasta(cfg formatConfig) error {
 	return nil
 }
 
-// formatFastaRdp handles RDP-native output with two-pass processing
 func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, writers *formatWriters) error {
-	// Create temp file for sequences
 	tmpFasta, err := os.CreateTemp("", "rdp_seqs_*.fasta")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -248,11 +245,10 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 
 	tmpWriter := bufio.NewWriterSize(tmpFasta, writerBufferSize)
 
-	// Pass 1: collect lineages and write sequences to temp file
 	builder := newRdpTaxonomyBuilder(cfg.RequireRanks)
 	var seqCount int
 
-	in, err := openInput(cfg.Input)
+	in, err := boldio.OpenInput(cfg.Input)
 	if err != nil {
 		return fmt.Errorf("open input for rdp: %w", err)
 	}
@@ -260,11 +256,11 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 		_ = in.Close()
 	}()
 
-	err = parseFasta(in, func(rec fastaRecord) error {
-		if rec.id == "" {
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
+		if rec.ID == "" {
 			return nil
 		}
-		taxid, ok := taxidMap[rec.id]
+		taxid, ok := taxidMap[rec.ID]
 		if !ok {
 			return nil
 		}
@@ -278,15 +274,13 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 			return nil
 		}
 
-		// Add lineage to taxonomy builder
 		resolved := builder.addLineage(names)
 		if len(resolved) == 0 {
 			return nil
 		}
 
-		// Write to temp file: seqid\tlineage_keys\tsequence
 		lineageStr := strings.Join(resolved, "|")
-		if _, err := tmpWriter.WriteString(rec.id + "\t" + lineageStr + "\t" + string(rec.seq) + "\n"); err != nil {
+		if _, err := tmpWriter.WriteString(rec.ID + "\t" + lineageStr + "\t" + string(rec.Seq) + "\n"); err != nil {
 			return fmt.Errorf("write temp: %w", err)
 		}
 		seqCount++
@@ -300,17 +294,14 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 	}
 	_ = tmpFasta.Close()
 
-	// Log disambiguation count
 	if builder.disambiguatedCount() > 0 {
 		util.Logf("rdp: disambiguated %d taxonomy names due to parent conflicts", builder.disambiguatedCount())
 	}
 
-	// Write taxonomy file
 	if err := builder.writeTaxonomyFile(writers.rdpTaxonomy.w); err != nil {
 		return fmt.Errorf("write taxonomy: %w", err)
 	}
 
-	// Pass 2: read temp file and write final FASTA with resolved lineages
 	tmpIn, err := os.Open(tmpPath)
 	if err != nil {
 		return fmt.Errorf("open temp: %w", err)
@@ -333,10 +324,9 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 		keys := strings.Split(parts[1], "|")
 		seq := parts[2]
 
-		// Build lineage string from resolved keys
 		lineageNames := builder.getLineageString(keys)
 		header := seqID + "\t" + lineageNames
-		if err := writeFasta(writers.rdpTrainFasta.w, header, []byte(seq)); err != nil {
+		if err := boldio.WriteFasta(writers.rdpTrainFasta.w, header, []byte(seq)); err != nil {
 			return err
 		}
 	}
@@ -454,19 +444,6 @@ func closeFormatWriters(w *formatWriters) {
 	flush(w.protaxMap)
 }
 
-func writeFasta(w *bufio.Writer, header string, seq []byte) error {
-	if _, err := w.WriteString(">" + header + "\n"); err != nil {
-		return fmt.Errorf("write header: %w", err)
-	}
-	if _, err := w.Write(seq); err != nil {
-		return fmt.Errorf("write seq: %w", err)
-	}
-	if _, err := w.WriteString("\n"); err != nil {
-		return fmt.Errorf("write newline: %w", err)
-	}
-	return nil
-}
-
 func buildLineage(lineage map[string]string, ranks []string) []string {
 	if len(ranks) == 0 {
 		return nil
@@ -495,4 +472,30 @@ func sintaxLineage(names []string) string {
 		log.Printf("sintax: dropping %d ranks beyond species for %v", len(names)-len(prefixes), names)
 	}
 	return strings.Join(parts, ",")
+}
+
+func sanitizeTaxon(name string) string {
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			b.WriteByte(c)
+		case c >= 'a' && c <= 'z':
+			b.WriteByte(c)
+		case c >= '0' && c <= '9':
+			b.WriteByte(c)
+		case c == '-' || c == '_' || c == '.':
+			b.WriteByte(c)
+		case c == ' ':
+			b.WriteByte('_')
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }

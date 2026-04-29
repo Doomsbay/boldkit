@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -113,7 +114,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 
 		if compress {
 			archive := filepath.Join(outDir, name+".tar.gz")
-			if err := packageDirGzip(outPath, archive, force); err != nil {
+			if err := boldio.PackageDirGzip(outPath, archive, force); err != nil {
 				return fmt.Errorf("compress %s failed: %w", name, err)
 			}
 		}
@@ -140,11 +141,11 @@ func resolveMarkerInput(markerDir, marker string) (string, error) {
 		return "", fmt.Errorf("marker is empty")
 	}
 	gz := filepath.Join(markerDir, marker+".fasta.gz")
-	if fileExists(gz) {
+	if boldio.FileExists(gz) {
 		return gz, nil
 	}
 	raw := filepath.Join(markerDir, marker+".fasta")
-	if fileExists(raw) {
+	if boldio.FileExists(raw) {
 		return raw, nil
 	}
 	return "", fmt.Errorf("marker FASTA not found (%s or %s)", gz, raw)

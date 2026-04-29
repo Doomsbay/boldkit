@@ -1,4 +1,4 @@
-package cmd
+package io
 
 import (
 	"bufio"
@@ -8,12 +8,12 @@ import (
 	"strings"
 )
 
-type fastaRecord struct {
-	id  string
-	seq []byte
+type FASTARecord struct {
+	ID  string
+	Seq []byte
 }
 
-func parseFasta(r io.Reader, onRecord func(fastaRecord) error) error {
+func ParseFasta(r io.Reader, onRecord func(FASTARecord) error) error {
 	scanner := bufio.NewScanner(r)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -24,9 +24,9 @@ func parseFasta(r io.Reader, onRecord func(fastaRecord) error) error {
 		if header == "" {
 			return nil
 		}
-		rec := fastaRecord{
-			id:  fastaID(header),
-			seq: append([]byte(nil), seq.Bytes()...),
+		rec := FASTARecord{
+			ID:  fastaID(header),
+			Seq: append([]byte(nil), seq.Bytes()...),
 		}
 		seq.Reset()
 		header = ""
@@ -64,28 +64,15 @@ func fastaID(header string) string {
 	return fields[0]
 }
 
-func sanitizeTaxon(name string) string {
-	if name == "" {
-		return ""
+func WriteFasta(w *bufio.Writer, header string, seq []byte) error {
+	if _, err := w.WriteString(">" + header + "\n"); err != nil {
+		return fmt.Errorf("write header: %w", err)
 	}
-	var b strings.Builder
-	b.Grow(len(name))
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		switch {
-		case c >= 'A' && c <= 'Z':
-			b.WriteByte(c)
-		case c >= 'a' && c <= 'z':
-			b.WriteByte(c)
-		case c >= '0' && c <= '9':
-			b.WriteByte(c)
-		case c == '-' || c == '_' || c == '.':
-			b.WriteByte(c)
-		case c == ' ':
-			b.WriteByte('_')
-		default:
-			b.WriteByte('_')
-		}
+	if _, err := w.Write(seq); err != nil {
+		return fmt.Errorf("write seq: %w", err)
 	}
-	return b.String()
+	if _, err := w.WriteString("\n"); err != nil {
+		return fmt.Errorf("write newline: %w", err)
+	}
+	return nil
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/klauspost/pgzip"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -45,7 +46,7 @@ func runMarkers(args []string) {
 
 	totalRows := -1
 	if *progressOn {
-		count, err := RowCount(*input)
+		count, err := boldio.RowCount(*input)
 		if err != nil {
 			fatalf("count rows failed: %v", err)
 		}
@@ -81,7 +82,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 		idxNuc     = -1
 	)
 
-	opts := DefaultOptions()
+	opts := boldio.DefaultOptions()
 	opts.StrictColumns = true
 	opts.BatchLines = 2048
 	if workers <= 0 {
@@ -111,7 +112,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 		},
 	}
 
-	err := ParseRows(inputPath, opts, func(row Row) error {
+	err := boldio.ParseRows(inputPath, opts, func(row boldio.Row) error {
 		if idxProcess < 0 {
 			idxProcess = util.IndexOfBytes(row.Fields, "processid")
 			idxMarker = util.IndexOfBytes(row.Fields, "marker_code")
@@ -186,7 +187,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 		return err
 	}
 
-	progress.finish()
+	progress.Finish()
 	return nil
 }
 
