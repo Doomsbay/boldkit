@@ -58,6 +58,7 @@ type splitQCConfig struct {
 	MaxN       int
 	MaxAmbig   int
 	MaxInvalid int
+	GapPolicy  string
 	DedupeSeqs bool
 	DedupeIDs  bool
 	Progress   bool
@@ -102,6 +103,7 @@ func runSplit(args []string) {
 	qcMaxN := fs.Int("qc-max-n", 0, "QC maximum N count")
 	qcMaxAmbig := fs.Int("qc-max-ambig", 0, "QC maximum IUPAC ambiguous count")
 	qcMaxInvalid := fs.Int("qc-max-invalid", 0, "QC maximum invalid character count")
+	qcGapPolicy := fs.String("qc-gap-policy", gapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
 	qcDedupe := fs.Bool("qc-dedupe", true, "QC drop duplicate sequences")
 	qcDedupeIDs := fs.Bool("qc-dedupe-ids", true, "QC drop duplicate IDs")
 	qcProgress := fs.Bool("qc-progress", true, "Show QC progress bar (approximate)")
@@ -115,6 +117,9 @@ func runSplit(args []string) {
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
+	if *qcGapPolicy != gapPolicyDrop && *qcGapPolicy != gapPolicyMerge {
+		fatalf("qc-gap-policy must be one of: %s, %s", gapPolicyDrop, gapPolicyMerge)
+	}
 	qcCfg := splitQCConfig{
 		Enabled:    *runQC,
 		MinLen:     *qcMin,
@@ -122,6 +127,7 @@ func runSplit(args []string) {
 		MaxN:       *qcMaxN,
 		MaxAmbig:   *qcMaxAmbig,
 		MaxInvalid: *qcMaxInvalid,
+		GapPolicy:  *qcGapPolicy,
 		DedupeSeqs: *qcDedupe,
 		DedupeIDs:  *qcDedupeIDs,
 		Progress:   *qcProgress,
@@ -161,6 +167,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 			MaxN:         qcCfg.MaxN,
 			MaxAmbig:     qcCfg.MaxAmbig,
 			MaxInvalid:   qcCfg.MaxInvalid,
+			GapPolicy:    qcCfg.GapPolicy,
 			DedupeSeqs:   qcCfg.DedupeSeqs,
 			DedupeIDs:    qcCfg.DedupeIDs,
 			RequireRanks: ranks,

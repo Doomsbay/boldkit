@@ -25,6 +25,7 @@ func runClassify(args []string) {
 	qcMaxN := fs.Int("qc-max-n", 0, "QC maximum N count")
 	qcMaxAmbig := fs.Int("qc-max-ambig", 0, "QC maximum IUPAC ambiguous count")
 	qcMaxInvalid := fs.Int("qc-max-invalid", 0, "QC maximum invalid character count")
+	qcGapPolicy := fs.String("qc-gap-policy", gapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
 	qcDedupe := fs.Bool("qc-dedupe", true, "QC drop duplicate sequences")
 	qcDedupeIDs := fs.Bool("qc-dedupe-ids", true, "QC drop duplicate IDs")
 	qcProgress := fs.Bool("qc-progress", true, "Show QC progress bar (approximate)")
@@ -41,6 +42,9 @@ func runClassify(args []string) {
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
+	if *qcGapPolicy != gapPolicyDrop && *qcGapPolicy != gapPolicyMerge {
+		fatalf("qc-gap-policy must be one of: %s, %s", gapPolicyDrop, gapPolicyMerge)
+	}
 
 	if *input == "" {
 		markerList := util.SplitList(*markers)
@@ -53,19 +57,19 @@ func runClassify(args []string) {
 				fatalf("marker %s: %v", marker, err)
 			}
 			baseOut := filepath.Join(*outDir, safeTag(marker))
-			if err := classifyOne(markerInput, baseOut, classifierList, ranks, *taxdumpDir, *taxidMap, *qcMin, *qcMax, *qcMaxN, *qcMaxAmbig, *qcMaxInvalid, *qcDedupe, *qcDedupeIDs, *qcProgress, *formatProgress, *qcOnly, *compress, *force); err != nil {
+			if err := classifyOne(markerInput, baseOut, classifierList, ranks, *taxdumpDir, *taxidMap, *qcMin, *qcMax, *qcMaxN, *qcMaxAmbig, *qcMaxInvalid, *qcGapPolicy, *qcDedupe, *qcDedupeIDs, *qcProgress, *formatProgress, *qcOnly, *compress, *force); err != nil {
 				fatalf("classify %s failed: %v", marker, err)
 			}
 		}
 		return
 	}
 
-	if err := classifyOne(*input, *outDir, classifierList, ranks, *taxdumpDir, *taxidMap, *qcMin, *qcMax, *qcMaxN, *qcMaxAmbig, *qcMaxInvalid, *qcDedupe, *qcDedupeIDs, *qcProgress, *formatProgress, *qcOnly, *compress, *force); err != nil {
+	if err := classifyOne(*input, *outDir, classifierList, ranks, *taxdumpDir, *taxidMap, *qcMin, *qcMax, *qcMaxN, *qcMaxAmbig, *qcMaxInvalid, *qcGapPolicy, *qcDedupe, *qcDedupeIDs, *qcProgress, *formatProgress, *qcOnly, *compress, *force); err != nil {
 		fatalf("classify failed: %v", err)
 	}
 }
 
-func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDir, taxidMap string, qcMin, qcMax, qcMaxN, qcMaxAmbig, qcMaxInvalid int, qcDedupe, qcDedupeIDs, qcProgress, formatProgress, qcOnly, compress, force bool) error {
+func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDir, taxidMap string, qcMin, qcMax, qcMaxN, qcMaxAmbig, qcMaxInvalid int, qcGapPolicy string, qcDedupe, qcDedupeIDs, qcProgress, formatProgress, qcOnly, compress, force bool) error {
 	base := qcBaseName(input)
 	qcOut := filepath.Join(outDir, "qc", base+".fasta")
 	qcCfg := qcConfig{
@@ -74,6 +78,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 		MaxN:         qcMaxN,
 		MaxAmbig:     qcMaxAmbig,
 		MaxInvalid:   qcMaxInvalid,
+		GapPolicy:    qcGapPolicy,
 		DedupeSeqs:   qcDedupe,
 		DedupeIDs:    qcDedupeIDs,
 		RequireRanks: ranks,

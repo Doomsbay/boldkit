@@ -14,12 +14,18 @@ import (
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
+const (
+	gapPolicyDrop  = "drop"
+	gapPolicyMerge = "merge"
+)
+
 type qcConfig struct {
 	MinLen       int
 	MaxLen       int
 	MaxN         int
 	MaxAmbig     int
 	MaxInvalid   int
+	GapPolicy    string
 	DedupeSeqs   bool
 	DedupeIDs    bool
 	RequireRanks []string
@@ -40,6 +46,7 @@ type qcStats struct {
 	TooManyN       int `json:"too_many_n"`
 	TooManyAmbig   int `json:"too_many_ambig"`
 	TooManyInvalid int `json:"too_many_invalid"`
+	Gapped         int `json:"gapped"`
 	DupeSeq        int `json:"duplicate_sequence"`
 	DupeID         int `json:"duplicate_id"`
 }
@@ -56,6 +63,7 @@ func runQC(args []string) {
 	maxN := fs.Int("max-n", -1, "Maximum N count allowed (-1 disables)")
 	maxAmbig := fs.Int("max-ambig", -1, "Maximum IUPAC ambiguous count allowed (-1 disables)")
 	maxInvalid := fs.Int("max-invalid", 0, "Maximum invalid character count allowed")
+	gapPolicy := fs.String("gap-policy", gapPolicyDrop, "Gap character handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
 	dedupeSeqs := fs.Bool("dedupe", true, "Drop duplicate sequences (cleaned)")
 	dedupeIDs := fs.Bool("dedupe-ids", true, "Drop duplicate sequence IDs")
 	progressOn := fs.Bool("progress", true, "Show progress bar (approximate)")
@@ -76,6 +84,9 @@ func runQC(args []string) {
 	if *maxInvalid < 0 {
 		fatalf("max-invalid must be >= 0")
 	}
+	if *gapPolicy != gapPolicyDrop && *gapPolicy != gapPolicyMerge {
+		fatalf("gap-policy must be one of: %s, %s", gapPolicyDrop, gapPolicyMerge)
+	}
 
 	cfg := qcConfig{
 		MinLen:       *minLen,
@@ -83,6 +94,7 @@ func runQC(args []string) {
 		MaxN:         *maxN,
 		MaxAmbig:     *maxAmbig,
 		MaxInvalid:   *maxInvalid,
+		GapPolicy:    *gapPolicy,
 		DedupeSeqs:   *dedupeSeqs,
 		DedupeIDs:    *dedupeIDs,
 		RequireRanks: util.SplitList(*requireRanks),
@@ -191,6 +203,11 @@ func qcFasta(input string, cfg qcConfig) error {
 		}
 
 		clean, counts := cleanSequence(rec.Seq)
+		if cfg.GapPolicy == gapPolicyDrop && counts.gapped > 0 {
+			stats.Gapped++
+			updateByteProgress(bar, counter, &lastCount)
+			return nil
+		}
 		if len(clean) == 0 {
 			stats.TooShort++
 			updateByteProgress(bar, counter, &lastCount)
@@ -257,8 +274,8 @@ func qcFasta(input string, cfg qcConfig) error {
 			return err
 		}
 	}
-	util.Logf("qc: total=%d kept=%d drop taxid=%d ranks=%d short=%d long=%d n=%d ambig=%d invalid=%d dup-seq=%d dup-id=%d",
-		stats.Total, stats.Written, stats.MissingTaxID, stats.MissingRanks, stats.TooShort, stats.TooLong, stats.TooManyN, stats.TooManyAmbig, stats.TooManyInvalid, stats.DupeSeq, stats.DupeID)
+	util.Logf("qc: total=%d kept=%d drop taxid=%d ranks=%d short=%d long=%d n=%d ambig=%d invalid=%d gaps=%d dup-seq=%d dup-id=%d",
+		stats.Total, stats.Written, stats.MissingTaxID, stats.MissingRanks, stats.TooShort, stats.TooLong, stats.TooManyN, stats.TooManyAmbig, stats.TooManyInvalid, stats.Gapped, stats.DupeSeq, stats.DupeID)
 	return nil
 }
 
@@ -266,6 +283,7 @@ type seqCounts struct {
 	n       int
 	ambig   int
 	invalid int
+	gapped  int
 }
 
 func cleanSequence(seq []byte) ([]byte, seqCounts) {
@@ -282,6 +300,8 @@ func cleanSequence(seq []byte) ([]byte, seqCounts) {
 		case 'R', 'Y', 'S', 'W', 'K', 'M', 'B', 'D', 'H', 'V',
 			'r', 'y', 's', 'w', 'k', 'm', 'b', 'd', 'h', 'v':
 			counts.ambig++
+		case '-':
+			counts.gapped++
 		default:
 			if c == '\r' || c == '\n' || c == '\t' || c == ' ' {
 				continue
