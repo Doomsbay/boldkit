@@ -92,7 +92,11 @@ func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin
 	}
 
 	util.Logf("Build marker FASTAs -> %s", markerDir)
-	if outputsExist(markerDir) && !force {
+	selected, skipMarkers, err := selectMissingMarkers(markerDir, selected, force)
+	if err != nil {
+		return fmt.Errorf("check marker outputs: %w", err)
+	}
+	if skipMarkers {
 		util.Logf("marker FASTAs exist, skipping (use --force to overwrite): %s", markerDir)
 	} else {
 		if err := os.MkdirAll(markerDir, 0o755); err != nil {

@@ -41,7 +41,11 @@ func runMarkers(args []string) {
 
 	selected := parseMarkerSelection(*markersFilter)
 
-	if !*force && outputsExist(*outDir) {
+	selected, skip, err := selectMissingMarkers(*outDir, selected, *force)
+	if err != nil {
+		fatalf("check marker outputs: %v", err)
+	}
+	if skip {
 		fmt.Fprintf(os.Stderr, "Marker FASTAs already exist, skipping: %s\n", *outDir)
 		return
 	}
@@ -76,6 +80,43 @@ func parseMarkerSelection(raw string) [][]byte {
 		selected = append(selected, []byte(name))
 	}
 	return selected
+}
+
+func selectMissingMarkers(outDir string, selected [][]byte, force bool) ([][]byte, bool, error) {
+	if force {
+		return selected, false, nil
+	}
+	if len(selected) == 0 {
+		return selected, outputsExist(outDir), nil
+	}
+	entries, err := os.ReadDir(outDir)
+	if os.IsNotExist(err) {
+		return selected, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	missing := make([][]byte, 0, len(selected))
+	for _, marker := range selected {
+		name := util.SanitizeMarkerBytes(nil, marker)
+		found := false
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			filename := strings.TrimSuffix(entry.Name(), ".gz")
+			if strings.EqualFold(filename, name+".fasta") {
+				found = true
+				break
+			}
+		}
+		if found {
+			util.Logf("markers: FASTA for %q exists, skipping (use --force to overwrite)", marker)
+		} else {
+			missing = append(missing, marker)
+		}
+	}
+	return missing, len(missing) == 0, nil
 }
 
 func markerSelected(marker []byte, selected [][]byte) bool {
@@ -209,7 +250,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 			seqPool.Put(seqBufPtr)
 			return fmt.Errorf("write marker %s: %w", sanitizedMarker, err)
 		}
-		counts[sanitizedMarker]++
+		counts[string(markerVal)]++
 
 		*recordPtr = record[:0]
 		recordPool.Put(recordPtr)
@@ -231,7 +272,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 	for _, n := range counts {
 		totalRecords += n
 	}
-	util.Logf("markers: wrote %d records across %d marker(s)", totalRecords, len(counts))
+	util.Logf("markers: wrote %d records across %d marker(s)", totalRecords, len(writers))
 
 	progress.Finish()
 	return nil

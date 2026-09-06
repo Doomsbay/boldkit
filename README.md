@@ -60,6 +60,8 @@ Wiki pages:
 
 Manual equivalents live in `scripts/01`–`06`.
 
+For `boldkit markers` and `boldkit pipeline`, an explicit `-markers COI-5P,MATK` selection builds only markers whose FASTAs are missing. Existing `.fasta` or `.fasta.gz` files are recognized case-insensitively and preserved; use `-force` to rebuild the selected markers. For example, `boldkit markers -input snapshot.tsv -outdir marker_fastas -markers MATK` adds MATK even when COI-5P already exists. With no marker selection, the existing directory-wide skip behavior still applies.
+
 ## Open/closed-world library workflow
 Use `boldkit split` to run QC, open/closed-world partitioning, taxdump pruning, and classifier library formatting.
 
