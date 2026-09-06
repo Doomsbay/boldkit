@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
 )
 
 func fatalf(format string, args ...any) {
@@ -40,4 +43,17 @@ func snapshotID(inputPath string) string {
 		return strings.TrimSuffix(base, ".tsv")
 	}
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+func updateByteProgress(bar *boldprogress.ByteProgress, counter *boldio.CountReader, last *int64) {
+	if bar == nil || counter == nil || last == nil {
+		return
+	}
+	cur := counter.Count()
+	delta := cur - *last
+	if delta <= 0 {
+		return
+	}
+	bar.Add(delta)
+	*last = cur
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -93,11 +94,11 @@ func formatFasta(cfg formatConfig) error {
 		_ = in.Close()
 	}()
 
-	var bar *byteProgress
+	var bar *boldprogress.ByteProgress
 	var lastCount int64
 	if cfg.Progress {
 		total := boldio.FileSize(cfg.Input)
-		bar = newByteProgress(total, "format (approx)")
+		bar = boldprogress.NewByte(total, "format (approx)")
 	}
 
 	if err := os.MkdirAll(cfg.OutDir, 0o755); err != nil {

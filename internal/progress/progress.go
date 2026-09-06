@@ -1,20 +1,19 @@
-package cmd
+package progress
 
 import (
 	"os"
 	"time"
 
-	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/schollz/progressbar/v3"
 )
 
-type progress struct {
+type Progress struct {
 	bar *progressbar.ProgressBar
 }
 
-func newProgress(total, reportEvery int) *progress {
+func New(total, reportEvery int) *Progress {
 	if reportEvery == 0 {
-		return &progress{bar: nil}
+		return &Progress{bar: nil}
 	}
 
 	opts := []progressbar.Option{
@@ -41,28 +40,28 @@ func newProgress(total, reportEvery int) *progress {
 		bar = progressbar.NewOptions(-1, opts...)
 	}
 
-	return &progress{bar: bar}
+	return &Progress{bar: bar}
 }
 
-func (p *progress) Increment() {
+func (p *Progress) Increment() {
 	if p.bar == nil {
 		return
 	}
 	_ = p.bar.Add(1)
 }
 
-func (p *progress) Finish() {
+func (p *Progress) Finish() {
 	if p.bar == nil {
 		return
 	}
 	_ = p.bar.Finish()
 }
 
-type byteProgress struct {
+type ByteProgress struct {
 	bar *progressbar.ProgressBar
 }
 
-func newByteProgress(total int64, label string) *byteProgress {
+func NewByte(total int64, label string) *ByteProgress {
 	opts := []progressbar.Option{
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionThrottle(250 * time.Millisecond),
@@ -80,39 +79,26 @@ func newByteProgress(total int64, label string) *byteProgress {
 			progressbar.OptionShowIts(),
 			progressbar.OptionSetPredictTime(true),
 		)
-		return &byteProgress{bar: progressbar.NewOptions64(total, opts...)}
+		return &ByteProgress{bar: progressbar.NewOptions64(total, opts...)}
 	}
 	opts = append(opts,
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionShowCount(),
 		progressbar.OptionShowIts(),
 	)
-	return &byteProgress{bar: progressbar.NewOptions(-1, opts...)}
+	return &ByteProgress{bar: progressbar.NewOptions(-1, opts...)}
 }
 
-func (b *byteProgress) Add(delta int64) {
+func (b *ByteProgress) Add(delta int64) {
 	if b == nil || b.bar == nil {
 		return
 	}
 	_ = b.bar.Add64(delta)
 }
 
-func (b *byteProgress) Finish() {
+func (b *ByteProgress) Finish() {
 	if b == nil || b.bar == nil {
 		return
 	}
 	_ = b.bar.Finish()
-}
-
-func updateByteProgress(bar *byteProgress, counter *boldio.CountReader, last *int64) {
-	if bar == nil || counter == nil || last == nil {
-		return
-	}
-	cur := counter.Count()
-	delta := cur - *last
-	if delta <= 0 {
-		return
-	}
-	bar.Add(delta)
-	*last = cur
 }

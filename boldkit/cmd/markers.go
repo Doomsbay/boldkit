@@ -14,6 +14,7 @@ import (
 	"github.com/klauspost/pgzip"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -75,7 +76,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 		}
 	}()
 
-	progress := newProgress(totalRows, reportEvery)
+	progress := boldprogress.New(totalRows, reportEvery)
 	var (
 		idxProcess = -1
 		idxMarker  = -1

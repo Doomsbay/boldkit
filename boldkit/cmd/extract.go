@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -78,7 +79,7 @@ func buildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 		_ = writer.Flush()
 	}()
 
-	progress := newProgress(totalRows, reportEvery)
+	progress := boldprogress.New(totalRows, reportEvery)
 
 	opts := boldio.DefaultOptions()
 	opts.Progress = progress

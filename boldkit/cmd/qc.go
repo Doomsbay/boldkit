@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -108,11 +109,11 @@ func qcFasta(input string, cfg qcConfig) error {
 		_ = in.Close()
 	}()
 
-	var bar *byteProgress
+	var bar *boldprogress.ByteProgress
 	var lastCount int64
 	if cfg.Progress {
 		total := boldio.FileSize(input)
-		bar = newByteProgress(total, "qc (approx)")
+		bar = boldprogress.NewByte(total, "qc (approx)")
 	}
 
 	if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
