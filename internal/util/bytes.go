@@ -4,7 +4,7 @@ func PrepareSeqBytes(dst []byte, src []byte) []byte {
 	dst = dst[:0]
 	for _, c := range src {
 		switch {
-		case c == '-' || c == ' ' || c == '\t' || c == '\r' || c == '\n':
+		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
 			continue
 		case c >= 'a' && c <= 'z':
 			dst = append(dst, c-32)
