@@ -12,6 +12,7 @@ import (
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
+	boldtaxonomy "github.com/Doomsbay/BoldKit/internal/taxonomy"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -109,14 +110,14 @@ func formatFasta(cfg formatConfig) error {
 	if taxidPath == "" {
 		taxidPath = filepath.Join(cfg.TaxdumpDir, "taxid.map")
 	}
-	taxidMap, err := loadTaxidMap(taxidPath)
+	taxidMap, err := boldtaxonomy.LoadTaxidMap(taxidPath)
 	if err != nil {
 		return err
 	}
 
 	nodesPath := filepath.Join(cfg.TaxdumpDir, "nodes.dmp")
 	namesPath := filepath.Join(cfg.TaxdumpDir, "names.dmp")
-	dump, err := loadTaxDump(nodesPath, namesPath)
+	dump, err := boldtaxonomy.LoadTaxDump(nodesPath, namesPath)
 	if err != nil {
 		return err
 	}
@@ -141,8 +142,8 @@ func formatFasta(cfg formatConfig) error {
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
-		lineage := dump.lineage(taxid)
-		if !hasAllRanks(lineage, cfg.RequireRanks) {
+		lineage := dump.Lineage(taxid)
+		if !boldtaxonomy.HasAllRanks(lineage, cfg.RequireRanks) {
 			stats.MissingRanks++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
@@ -233,7 +234,7 @@ func formatFasta(cfg formatConfig) error {
 	return nil
 }
 
-func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, writers *formatWriters) error {
+func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *boldtaxonomy.TaxDump, writers *formatWriters) error {
 	tmpFasta, err := os.CreateTemp("", "rdp_seqs_*.fasta")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -246,7 +247,7 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 
 	tmpWriter := bufio.NewWriterSize(tmpFasta, writerBufferSize)
 
-	builder := newRdpTaxonomyBuilder(cfg.RequireRanks)
+	builder := boldtaxonomy.NewRDPTaxonomyBuilder(cfg.RequireRanks)
 	var seqCount int
 
 	in, err := boldio.OpenInput(cfg.Input)
@@ -265,8 +266,8 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 		if !ok {
 			return nil
 		}
-		lineage := dump.lineage(taxid)
-		if !hasAllRanks(lineage, cfg.RequireRanks) {
+		lineage := dump.Lineage(taxid)
+		if !boldtaxonomy.HasAllRanks(lineage, cfg.RequireRanks) {
 			return nil
 		}
 
@@ -275,7 +276,7 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 			return nil
 		}
 
-		resolved := builder.addLineage(names)
+		resolved := builder.AddLineage(names)
 		if len(resolved) == 0 {
 			return nil
 		}
@@ -295,11 +296,11 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 	}
 	_ = tmpFasta.Close()
 
-	if builder.disambiguatedCount() > 0 {
-		util.Logf("rdp: disambiguated %d taxonomy names due to parent conflicts", builder.disambiguatedCount())
+	if builder.DisambiguatedCount() > 0 {
+		util.Logf("rdp: disambiguated %d taxonomy names due to parent conflicts", builder.DisambiguatedCount())
 	}
 
-	if err := builder.writeTaxonomyFile(writers.rdpTaxonomy.w); err != nil {
+	if err := builder.WriteTaxonomyFile(writers.rdpTaxonomy.w); err != nil {
 		return fmt.Errorf("write taxonomy: %w", err)
 	}
 
@@ -325,7 +326,7 @@ func formatFastaRdp(cfg formatConfig, taxidMap map[string]int, dump *taxDump, wr
 		keys := strings.Split(parts[1], "|")
 		seq := parts[2]
 
-		lineageNames := builder.getLineageString(keys)
+		lineageNames := builder.GetLineageString(keys)
 		header := seqID + "\t" + lineageNames
 		if err := boldio.WriteFasta(writers.rdpTrainFasta.w, header, []byte(seq)); err != nil {
 			return err

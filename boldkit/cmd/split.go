@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	boldtaxonomy "github.com/Doomsbay/BoldKit/internal/taxonomy"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -598,14 +599,14 @@ func pruneTaxdumpForSeenTrain(seenTrainIDs map[string]struct{}, taxdumpDir, taxi
 	if taxidMapPath == "" {
 		taxidMapPath = filepath.Join(taxdumpDir, "taxid.map")
 	}
-	pidToTaxid, err := loadTaxidMap(taxidMapPath)
+	pidToTaxid, err := boldtaxonomy.LoadTaxidMap(taxidMapPath)
 	if err != nil {
 		return "", 0, err
 	}
 
 	nodesPath := filepath.Join(taxdumpDir, "nodes.dmp")
 	namesPath := filepath.Join(taxdumpDir, "names.dmp")
-	dump, err := loadTaxDump(nodesPath, namesPath)
+	dump, err := boldtaxonomy.LoadTaxDump(nodesPath, namesPath)
 	if err != nil {
 		return "", 0, err
 	}
@@ -625,14 +626,14 @@ func pruneTaxdumpForSeenTrain(seenTrainIDs map[string]struct{}, taxdumpDir, taxi
 				break
 			}
 			keep[cur] = struct{}{}
-			node, ok := dump.nodes[cur]
+			node, ok := dump.Node(cur)
 			if !ok {
 				break
 			}
-			if node.parent == cur || node.parent <= 0 {
+			if node.Parent == cur || node.Parent <= 0 {
 				break
 			}
-			cur = node.parent
+			cur = node.Parent
 		}
 	}
 
@@ -641,10 +642,10 @@ func pruneTaxdumpForSeenTrain(seenTrainIDs map[string]struct{}, taxdumpDir, taxi
 		return "", 0, fmt.Errorf("create pruned taxdump dir: %w", err)
 	}
 
-	if err := writePrunedNodes(filepath.Join(prunedDir, "nodes.dmp"), dump.nodes, keep); err != nil {
+	if err := writePrunedNodes(filepath.Join(prunedDir, "nodes.dmp"), dump, keep); err != nil {
 		return "", 0, err
 	}
-	if err := writePrunedNames(filepath.Join(prunedDir, "names.dmp"), dump.nodes, keep); err != nil {
+	if err := writePrunedNames(filepath.Join(prunedDir, "names.dmp"), dump, keep); err != nil {
 		return "", 0, err
 	}
 	if err := writePrunedTaxidMap(filepath.Join(prunedDir, "taxid.map"), seenTrainTaxids); err != nil {
@@ -654,7 +655,7 @@ func pruneTaxdumpForSeenTrain(seenTrainIDs map[string]struct{}, taxdumpDir, taxi
 	return prunedDir, len(keep), nil
 }
 
-func writePrunedNodes(path string, nodes map[int]taxNode, keep map[int]struct{}) error {
+func writePrunedNodes(path string, dump *boldtaxonomy.TaxDump, keep map[int]struct{}) error {
 	ids := sortedIntSet(keep)
 	f, err := os.Create(path)
 	if err != nil {
@@ -670,18 +671,18 @@ func writePrunedNodes(path string, nodes map[int]taxNode, keep map[int]struct{})
 	}()
 
 	for _, id := range ids {
-		node, ok := nodes[id]
+		node, ok := dump.Node(id)
 		if !ok {
 			continue
 		}
-		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + strconv.Itoa(node.parent) + "\t|\t" + node.rank + "\t|\n"); err != nil {
+		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + strconv.Itoa(node.Parent) + "\t|\t" + node.Rank + "\t|\n"); err != nil {
 			return fmt.Errorf("write nodes.dmp: %w", err)
 		}
 	}
 	return nil
 }
 
-func writePrunedNames(path string, nodes map[int]taxNode, keep map[int]struct{}) error {
+func writePrunedNames(path string, dump *boldtaxonomy.TaxDump, keep map[int]struct{}) error {
 	ids := sortedIntSet(keep)
 	f, err := os.Create(path)
 	if err != nil {
@@ -697,11 +698,11 @@ func writePrunedNames(path string, nodes map[int]taxNode, keep map[int]struct{})
 	}()
 
 	for _, id := range ids {
-		node, ok := nodes[id]
-		if !ok || node.name == "" {
+		node, ok := dump.Node(id)
+		if !ok || node.Name == "" {
 			continue
 		}
-		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + node.name + "\t|\t\t|\tscientific name\t|\n"); err != nil {
+		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + node.Name + "\t|\t\t|\tscientific name\t|\n"); err != nil {
 			return fmt.Errorf("write names.dmp: %w", err)
 		}
 	}

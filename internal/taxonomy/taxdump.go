@@ -1,4 +1,4 @@
-package cmd
+package taxonomy
 
 import (
 	"bufio"
@@ -8,19 +8,19 @@ import (
 	"strings"
 )
 
-type taxNode struct {
-	parent int
-	rank   string
-	name   string
+type TaxNode struct {
+	Parent int
+	Rank   string
+	Name   string
 }
 
-type taxDump struct {
-	nodes map[int]taxNode
+type TaxDump struct {
+	nodes map[int]TaxNode
 	cache map[int]map[string]string
 	alias map[string]string
 }
 
-func loadTaxDump(nodesPath, namesPath string) (*taxDump, error) {
+func LoadTaxDump(nodesPath, namesPath string) (*TaxDump, error) {
 	names, err := loadNames(namesPath)
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func loadTaxDump(nodesPath, namesPath string) (*taxDump, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &taxDump{
+	return &TaxDump{
 		nodes: nodes,
 		cache: make(map[int]map[string]string),
 		alias: map[string]string{
@@ -74,7 +74,7 @@ func loadNames(path string) (map[int]string, error) {
 	return names, nil
 }
 
-func loadNodes(path string, names map[int]string) (map[int]taxNode, error) {
+func loadNodes(path string, names map[int]string) (map[int]TaxNode, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open nodes.dmp: %w", err)
@@ -83,7 +83,7 @@ func loadNodes(path string, names map[int]string) (map[int]taxNode, error) {
 		_ = f.Close()
 	}()
 
-	nodes := make(map[int]taxNode, 1<<20)
+	nodes := make(map[int]TaxNode, 1<<20)
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -101,10 +101,10 @@ func loadNodes(path string, names map[int]string) (map[int]taxNode, error) {
 			continue
 		}
 		name := names[id]
-		nodes[id] = taxNode{
-			parent: parent,
-			rank:   fields[2],
-			name:   name,
+		nodes[id] = TaxNode{
+			Parent: parent,
+			Rank:   fields[2],
+			Name:   name,
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -125,7 +125,12 @@ func parseDmpLine(line string) []string {
 	return out
 }
 
-func (t *taxDump) lineage(taxid int) map[string]string {
+func (t *TaxDump) Node(taxid int) (TaxNode, bool) {
+	node, ok := t.nodes[taxid]
+	return node, ok
+}
+
+func (t *TaxDump) Lineage(taxid int) map[string]string {
 	if taxid <= 0 {
 		return nil
 	}
@@ -141,19 +146,19 @@ func (t *taxDump) lineage(taxid int) map[string]string {
 		if !ok {
 			break
 		}
-		rank := node.rank
+		rank := node.Rank
 		if alias, ok := t.alias[rank]; ok {
 			rank = alias
 		}
-		if rank != "" && rank != "no rank" && node.name != "" {
+		if rank != "" && rank != "no rank" && node.Name != "" {
 			if _, exists := lineage[rank]; !exists {
-				lineage[rank] = node.name
+				lineage[rank] = node.Name
 			}
 		}
-		if node.parent == cur {
+		if node.Parent == cur {
 			break
 		}
-		cur = node.parent
+		cur = node.Parent
 	}
 	t.cache[taxid] = lineage
 	return lineage

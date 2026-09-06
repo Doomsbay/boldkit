@@ -1,4 +1,4 @@
-package cmd
+package taxonomy
 
 import (
 	"fmt"
@@ -16,8 +16,8 @@ type rdpTaxonNode struct {
 	parentKey string // key of parent node
 }
 
-// rdpTaxonomyBuilder manages construction of an RDP-compatible taxonomy tree
-type rdpTaxonomyBuilder struct {
+// RDPTaxonomyBuilder manages construction of an RDP-compatible taxonomy tree
+type RDPTaxonomyBuilder struct {
 	nodes       map[string]*rdpTaxonNode // key -> node (key = "name|rank" or disambiguated)
 	nameRank    map[string]string        // "(name_lower|rank)" -> node key
 	taxids      map[string]int           // key -> assigned taxid
@@ -32,8 +32,8 @@ var rdpRankAliases = map[string]string{
 	"kingdom":      "domain",
 }
 
-// newRdpTaxonomyBuilder creates a new taxonomy builder with the given rank order
-func newRdpTaxonomyBuilder(ranks []string) *rdpTaxonomyBuilder {
+// NewRDPTaxonomyBuilder creates a new taxonomy builder with the given rank order
+func NewRDPTaxonomyBuilder(ranks []string) *RDPTaxonomyBuilder {
 	// Map ranks to RDP labels
 	rdpRanks := make([]string, len(ranks))
 	for i, r := range ranks {
@@ -43,7 +43,7 @@ func newRdpTaxonomyBuilder(ranks []string) *rdpTaxonomyBuilder {
 			rdpRanks[i] = r
 		}
 	}
-	return &rdpTaxonomyBuilder{
+	return &RDPTaxonomyBuilder{
 		nodes:     make(map[string]*rdpTaxonNode),
 		nameRank:  make(map[string]string),
 		taxids:    make(map[string]int),
@@ -52,9 +52,9 @@ func newRdpTaxonomyBuilder(ranks []string) *rdpTaxonomyBuilder {
 	}
 }
 
-// addLineage adds a lineage to the tree and returns the resolved node keys
+// AddLineage adds a lineage to the tree and returns the resolved node keys
 // names should be in rank order (e.g., [domain_val, phylum_val, class_val, ...])
-func (b *rdpTaxonomyBuilder) addLineage(names []string) []string {
+func (b *RDPTaxonomyBuilder) AddLineage(names []string) []string {
 	if len(names) == 0 {
 		return nil
 	}
@@ -98,7 +98,7 @@ func (b *rdpTaxonomyBuilder) addLineage(names []string) []string {
 }
 
 // resolveName resolves a name to a unique node key, handling conflicts
-func (b *rdpTaxonomyBuilder) resolveName(name, rank, parentKey string, depth int) string {
+func (b *RDPTaxonomyBuilder) resolveName(name, rank, parentKey string, depth int) string {
 	nameLower := strings.ToLower(name)
 	nameRankKey := nameLower + "|" + rank
 
@@ -126,7 +126,7 @@ func (b *rdpTaxonomyBuilder) resolveName(name, rank, parentKey string, depth int
 }
 
 // disambiguate handles same name under different parent by prefixing with parent name
-func (b *rdpTaxonomyBuilder) disambiguate(name, rank, parentKey string, depth int) string {
+func (b *RDPTaxonomyBuilder) disambiguate(name, rank, parentKey string, depth int) string {
 	if depth > 50 {
 		key := name + "|" + rank
 		return key
@@ -161,7 +161,7 @@ func (b *rdpTaxonomyBuilder) disambiguate(name, rank, parentKey string, depth in
 }
 
 // assignTaxids assigns integer taxids to all nodes in breadth-first order
-func (b *rdpTaxonomyBuilder) assignTaxids() {
+func (b *RDPTaxonomyBuilder) assignTaxids() {
 	// Root already has taxid 0
 	// Assign taxids by depth order
 	byDepth := make(map[int][]string)
@@ -191,9 +191,9 @@ func (b *rdpTaxonomyBuilder) assignTaxids() {
 	}
 }
 
-// writeTaxonomyFile writes the taxonomy in RDP format
+// WriteTaxonomyFile writes the taxonomy in RDP format
 // Format: taxid*name*parent_taxid*depth*rank
-func (b *rdpTaxonomyBuilder) writeTaxonomyFile(w io.Writer) error {
+func (b *RDPTaxonomyBuilder) WriteTaxonomyFile(w io.Writer) error {
 	// Assign taxids first
 	b.assignTaxids()
 
@@ -229,8 +229,8 @@ func (b *rdpTaxonomyBuilder) writeTaxonomyFile(w io.Writer) error {
 	return nil
 }
 
-// getLineageString returns the semicolon-delimited lineage string for a sequence of node keys
-func (b *rdpTaxonomyBuilder) getLineageString(keys []string) string {
+// GetLineageString returns the semicolon-delimited lineage string for a sequence of node keys
+func (b *RDPTaxonomyBuilder) GetLineageString(keys []string) string {
 	names := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if node, ok := b.nodes[key]; ok {
@@ -240,7 +240,7 @@ func (b *rdpTaxonomyBuilder) getLineageString(keys []string) string {
 	return strings.Join(names, ";")
 }
 
-// disambiguatedCount returns the count of disambiguated names
-func (b *rdpTaxonomyBuilder) disambiguatedCount() int {
+// DisambiguatedCount returns the count of disambiguated names
+func (b *RDPTaxonomyBuilder) DisambiguatedCount() int {
 	return b.disambigCnt
 }

@@ -3,16 +3,14 @@ package cmd
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
+	boldtaxonomy "github.com/Doomsbay/BoldKit/internal/taxonomy"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -132,13 +130,13 @@ func qcFasta(input string, cfg qcConfig) error {
 	}()
 
 	var taxidMap map[string]int
-	var dump *taxDump
+	var dump *boldtaxonomy.TaxDump
 	if len(cfg.RequireRanks) > 0 || cfg.TaxidMapPath != "" {
 		taxidPath := cfg.TaxidMapPath
 		if taxidPath == "" {
 			taxidPath = filepath.Join(cfg.TaxdumpDir, "taxid.map")
 		}
-		taxidMap, err = loadTaxidMap(taxidPath)
+		taxidMap, err = boldtaxonomy.LoadTaxidMap(taxidPath)
 		if err != nil {
 			return err
 		}
@@ -146,7 +144,7 @@ func qcFasta(input string, cfg qcConfig) error {
 	if len(cfg.RequireRanks) > 0 {
 		nodesPath := filepath.Join(cfg.TaxdumpDir, "nodes.dmp")
 		namesPath := filepath.Join(cfg.TaxdumpDir, "names.dmp")
-		dump, err = loadTaxDump(nodesPath, namesPath)
+		dump, err = boldtaxonomy.LoadTaxDump(nodesPath, namesPath)
 		if err != nil {
 			return err
 		}
@@ -184,8 +182,8 @@ func qcFasta(input string, cfg qcConfig) error {
 		}
 
 		if len(cfg.RequireRanks) > 0 && dump != nil {
-			lineage := dump.lineage(taxid)
-			if !hasAllRanks(lineage, cfg.RequireRanks) {
+			lineage := dump.Lineage(taxid)
+			if !boldtaxonomy.HasAllRanks(lineage, cfg.RequireRanks) {
 				stats.MissingRanks++
 				updateByteProgress(bar, counter, &lastCount)
 				return nil
@@ -292,61 +290,6 @@ func cleanSequence(seq []byte) ([]byte, seqCounts) {
 		}
 	}
 	return clean, counts
-}
-
-func hasAllRanks(lineage map[string]string, required []string) bool {
-	if len(required) == 0 {
-		return true
-	}
-	for _, rank := range required {
-		if rank == "" {
-			continue
-		}
-		if lineage[rank] == "" {
-			return false
-		}
-	}
-	return true
-}
-
-func loadTaxidMap(path string) (map[string]int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open taxid.map: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-	out := make(map[string]int, 1<<20)
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
-			fields = strings.Fields(line)
-		}
-		if len(fields) < 2 {
-			continue
-		}
-		id := fields[0]
-		taxid, err := strconv.Atoi(fields[1])
-		if err != nil {
-			continue
-		}
-		out[id] = taxid
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan taxid.map: %w", err)
-	}
-	if len(out) == 0 {
-		return nil, errors.New("taxid.map is empty")
-	}
-	return out, nil
 }
 
 func writeQCReport(path string, stats qcStats) error {
