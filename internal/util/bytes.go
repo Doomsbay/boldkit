@@ -1,13 +1,15 @@
 package util
 
-func FilterSeqBytes(dst []byte, src []byte) []byte {
+func PrepareSeqBytes(dst []byte, src []byte) []byte {
 	dst = dst[:0]
 	for _, c := range src {
-		switch c {
-		case 'A', 'C', 'G', 'T':
-			dst = append(dst, c)
-		case 'a', 'c', 'g', 't':
+		switch {
+		case c == '-' || c == ' ' || c == '\t' || c == '\r' || c == '\n':
+			continue
+		case c >= 'a' && c <= 'z':
 			dst = append(dst, c-32)
+		default:
+			dst = append(dst, c)
 		}
 	}
 	return dst

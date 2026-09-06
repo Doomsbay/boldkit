@@ -29,6 +29,7 @@ func runPipeline(args []string) {
 	taxonkitBin := fs.String("taxonkit-bin", "", "Path to taxonkit binary (default: search PATH)")
 	progressOn := fs.Bool("progress", true, "Show progress bar")
 	noGzip := fs.Bool("no-gzip", false, "Disable gzip for marker FASTAs")
+	markersFilter := fs.String("markers", "", "Comma-separated marker codes to build (empty = all, case-insensitive)")
 	workers := fs.Int("workers", runtime.GOMAXPROCS(0), "Parser worker goroutines (<=0 defaults to GOMAXPROCS)")
 	force := fs.Bool("force", false, "Overwrite existing outputs")
 	packageFlag := fs.Bool("package", false, "Create release zips, manifest, and checksums")
@@ -69,12 +70,12 @@ func runPipeline(args []string) {
 		reportEvery = 1
 	}
 
-	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap, extractCfg); err != nil {
+	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap, extractCfg, parseMarkerSelection(*markersFilter)); err != nil {
 		fatalf("pipeline failed: %v", err)
 	}
 }
 
-func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extractCurationConfig) error {
+func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extractCurationConfig, selected [][]byte) error {
 	util.Logf("Input format: %s", boldio.InputFormat(input))
 	util.Logf("Extract taxonomy -> %s", taxonkitOut)
 	if boldio.FileExists(taxonkitOut) && !force {
@@ -97,7 +98,7 @@ func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin
 		if err := os.MkdirAll(markerDir, 0o755); err != nil {
 			return fmt.Errorf("create marker output dir: %w", err)
 		}
-		if err := buildMarkerFastas(input, markerDir, gzipOut, reportEvery, totalRows, workers); err != nil {
+		if err := buildMarkerFastas(input, markerDir, gzipOut, reportEvery, totalRows, workers, selected); err != nil {
 			return fmt.Errorf("build markers: %w", err)
 		}
 	}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/klauspost/pgzip"
@@ -28,6 +30,7 @@ func runMarkers(args []string) {
 	fs := flag.NewFlagSet("markers", flag.ExitOnError)
 	input := fs.String("input", "BOLD_Public.*/BOLD_Public.*.tsv", "BOLD input file (TSV or Parquet)")
 	outDir := fs.String("outdir", "marker_fastas", "Output directory for marker FASTAs")
+	markersFilter := fs.String("markers", "", "Comma-separated marker codes to build (empty = all, case-insensitive)")
 	progressOn := fs.Bool("progress", true, "Show progress bar")
 	gzipOut := fs.Bool("gzip", true, "Compress FASTA outputs to .fasta.gz")
 	force := fs.Bool("force", false, "Overwrite existing outputs")
@@ -35,6 +38,8 @@ func runMarkers(args []string) {
 	if err := fs.Parse(args); err != nil {
 		fatalf("parse args failed: %v", err)
 	}
+
+	selected := parseMarkerSelection(*markersFilter)
 
 	if !*force && outputsExist(*outDir) {
 		fmt.Fprintf(os.Stderr, "Marker FASTAs already exist, skipping: %s\n", *outDir)
@@ -59,13 +64,41 @@ func runMarkers(args []string) {
 		reportEvery = 1
 	}
 
-	if err := buildMarkerFastas(*input, *outDir, *gzipOut, reportEvery, totalRows, *workers); err != nil {
+	if err := buildMarkerFastas(*input, *outDir, *gzipOut, reportEvery, totalRows, *workers, selected); err != nil {
 		fatalf("build failed: %v", err)
 	}
 }
 
-func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, totalRows, workers int) error {
+func parseMarkerSelection(raw string) [][]byte {
+	names := util.SplitList(raw)
+	selected := make([][]byte, 0, len(names))
+	for _, name := range names {
+		selected = append(selected, []byte(name))
+	}
+	return selected
+}
+
+func markerSelected(marker []byte, selected [][]byte) bool {
+	for _, s := range selected {
+		if bytes.EqualFold(marker, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func markerWritten(counts map[string]int, name string) bool {
+	for key := range counts {
+		if strings.EqualFold(key, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, totalRows, workers int, selected [][]byte) error {
 	writers := make(map[string]*markerWriter)
+	counts := make(map[string]int)
 	defer func() {
 		for _, w := range writers {
 			_ = w.buf.Flush()
@@ -129,24 +162,23 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 			return fmt.Errorf("line %d: expected at least %d fields", row.Line, util.MaxIndex(idxProcess, idxMarker, idxNuc)+1)
 		}
 
-		nuc := fields[idxNuc]
-		if len(nuc) == 0 || util.IsNull(nuc) {
-			return nil
-		}
-
-		seqBufPtr := seqPool.Get().(*[]byte)
-		seqBuf := *seqBufPtr
-		seq := util.FilterSeqBytes(seqBuf, nuc)
-		if len(seq) == 0 {
-			*seqBufPtr = seq[:0]
-			seqPool.Put(seqBufPtr)
-			return nil
-		}
-
 		markerVal := util.Normalize(fields[idxMarker])
 		if len(markerVal) == 0 {
 			markerVal = []byte("UNKNOWN")
 		}
+
+		if len(selected) > 0 && !markerSelected(markerVal, selected) {
+			return nil
+		}
+
+		nuc := fields[idxNuc]
+		if util.IsNull(nuc) {
+			nuc = nil
+		}
+
+		seqBufPtr := seqPool.Get().(*[]byte)
+		seqBuf := *seqBufPtr
+		seq := util.PrepareSeqBytes(seqBuf, nuc)
 
 		markerScratchPtr := markerBufPool.Get().(*[]byte)
 		markerScratch := *markerScratchPtr
@@ -177,6 +209,7 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 			seqPool.Put(seqBufPtr)
 			return fmt.Errorf("write marker %s: %w", sanitizedMarker, err)
 		}
+		counts[sanitizedMarker]++
 
 		*recordPtr = record[:0]
 		recordPool.Put(recordPtr)
@@ -187,6 +220,18 @@ func buildMarkerFastas(inputPath, outDir string, gzipOut bool, reportEvery, tota
 	if err != nil {
 		return err
 	}
+
+	for _, sel := range selected {
+		if !markerWritten(counts, string(sel)) {
+			util.Logf("markers: warning: selected marker %q matched 0 records", string(sel))
+		}
+	}
+
+	var totalRecords int
+	for _, n := range counts {
+		totalRecords += n
+	}
+	util.Logf("markers: wrote %d records across %d marker(s)", totalRecords, len(counts))
 
 	progress.Finish()
 	return nil
