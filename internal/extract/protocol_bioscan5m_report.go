@@ -1,4 +1,4 @@
-package cmd
+package extract
 
 import (
 	"bufio"
@@ -80,7 +80,7 @@ type bioscanCurationReport struct {
 	Stats          bioscanCurationStats      `json:"stats"`
 }
 
-func (c *bioscan5MCurator) openAudit() error {
+func (c *Bioscan5MCurator) openAudit() error {
 	if c.cfg.AuditPath == "" {
 		return nil
 	}
@@ -99,23 +99,24 @@ func (c *bioscan5MCurator) openAudit() error {
 	return nil
 }
 
-func (c *bioscan5MCurator) closeAudit() error {
+func (c *Bioscan5MCurator) closeAudit() error {
+	var firstErr error
 	if c.auditWriter != nil {
 		if err := c.auditWriter.Flush(); err != nil {
-			return fmt.Errorf("flush audit: %w", err)
+			firstErr = fmt.Errorf("flush audit: %w", err)
 		}
 		c.auditWriter = nil
 	}
 	if c.auditFile != nil {
-		if err := c.auditFile.Close(); err != nil {
-			return fmt.Errorf("close audit: %w", err)
+		if err := c.auditFile.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close audit: %w", err)
 		}
 		c.auditFile = nil
 	}
-	return nil
+	return firstErr
 }
 
-func (c *bioscan5MCurator) writeAuditRow(before, after extractTaxonRecord, ruleSet map[string]struct{}, changed bool) error {
+func (c *Bioscan5MCurator) writeAuditRow(before, after TaxonRecord, ruleSet map[string]struct{}, changed bool) error {
 	if c.auditWriter == nil || !changed {
 		return nil
 	}
@@ -137,7 +138,7 @@ func (c *bioscan5MCurator) writeAuditRow(before, after extractTaxonRecord, ruleS
 	return nil
 }
 
-func (c *bioscan5MCurator) writeReport() error {
+func (c *Bioscan5MCurator) writeReport() error {
 	if c.cfg.ReportPath == "" {
 		return nil
 	}
@@ -153,7 +154,7 @@ func (c *bioscan5MCurator) writeReport() error {
 	}()
 
 	report := bioscanCurationReport{
-		Protocol:       extractCurationProtocolBioscan5M,
+		Protocol:       ProtocolBioscan5M,
 		RulesetVersion: bioscanRulesetVersion,
 		InputPath:      c.inputPath,
 		AuditPath:      c.cfg.AuditPath,
@@ -169,7 +170,7 @@ func (c *bioscan5MCurator) writeReport() error {
 	if err := enc.Encode(report); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
-	util.Logf("extract (%s): report -> %s", extractCurationProtocolBioscan5M, c.cfg.ReportPath)
+	util.Logf("extract (%s): report -> %s", ProtocolBioscan5M, c.cfg.ReportPath)
 	return nil
 }
 

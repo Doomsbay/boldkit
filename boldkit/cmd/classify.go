@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Doomsbay/BoldKit/internal/format"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	"github.com/Doomsbay/BoldKit/internal/qc"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -25,7 +27,7 @@ func runClassify(args []string) {
 	qcMaxN := fs.Int("qc-max-n", 0, "QC maximum N count")
 	qcMaxAmbig := fs.Int("qc-max-ambig", 0, "QC maximum IUPAC ambiguous count")
 	qcMaxInvalid := fs.Int("qc-max-invalid", 0, "QC maximum invalid character count")
-	qcGapPolicy := fs.String("qc-gap-policy", gapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
+	qcGapPolicy := fs.String("qc-gap-policy", qc.GapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
 	qcDedupe := fs.Bool("qc-dedupe", true, "QC drop duplicate sequences")
 	qcDedupeIDs := fs.Bool("qc-dedupe-ids", true, "QC drop duplicate IDs")
 	qcProgress := fs.Bool("qc-progress", true, "Show QC progress bar (approximate)")
@@ -42,8 +44,8 @@ func runClassify(args []string) {
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
-	if *qcGapPolicy != gapPolicyDrop && *qcGapPolicy != gapPolicyMerge {
-		fatalf("qc-gap-policy must be one of: %s, %s", gapPolicyDrop, gapPolicyMerge)
+	if *qcGapPolicy != qc.GapPolicyDrop && *qcGapPolicy != qc.GapPolicyMerge {
+		fatalf("qc-gap-policy must be one of: %s, %s", qc.GapPolicyDrop, qc.GapPolicyMerge)
 	}
 
 	if *input == "" {
@@ -72,7 +74,7 @@ func runClassify(args []string) {
 func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDir, taxidMap string, qcMin, qcMax, qcMaxN, qcMaxAmbig, qcMaxInvalid int, qcGapPolicy string, qcDedupe, qcDedupeIDs, qcProgress, formatProgress, qcOnly, compress, force bool) error {
 	base := qcBaseName(input)
 	qcOut := filepath.Join(outDir, "qc", base+".fasta")
-	qcCfg := qcConfig{
+	qcCfg := qc.Config{
 		MinLen:       qcMin,
 		MaxLen:       qcMax,
 		MaxN:         qcMaxN,
@@ -89,7 +91,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 	}
 
 	util.Logf("QC -> %s", qcOut)
-	if err := qcFasta(input, qcCfg); err != nil {
+	if err := qc.RunQC(input, qcCfg); err != nil {
 		return fmt.Errorf("qc failed: %w", err)
 	}
 
@@ -103,7 +105,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 		}
 		name := strings.ToLower(classifier)
 		outPath := filepath.Join(outDir, name)
-		cfg := formatConfig{
+		cfg := format.FormatConfig{
 			Classifiers:  []string{name},
 			RequireRanks: ranks,
 			Input:        qcOut,
@@ -113,7 +115,7 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 			Progress:     formatProgress,
 		}
 		util.Logf("Format %s -> %s", name, outPath)
-		if err := formatFasta(cfg); err != nil {
+		if err := format.FormatFasta(cfg); err != nil {
 			return fmt.Errorf("format %s failed: %w", name, err)
 		}
 

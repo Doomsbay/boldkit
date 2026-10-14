@@ -1,4 +1,4 @@
-package cmd
+package extract
 
 import (
 	"encoding/json"
@@ -9,13 +9,13 @@ import (
 )
 
 func TestBioscanCurateSubfamilyHoleAndEpithetOnlySpecies(t *testing.T) {
-	curatorRaw, err := newExtractBioscan5MCurator(extractCurationConfig{Protocol: extractCurationProtocolBioscan5M}, "")
+	curatorRaw, err := NewBioscan5MCurator(CurationConfig{Protocol: ProtocolBioscan5M}, "")
 	if err != nil {
-		t.Fatalf("newExtractBioscan5MCurator failed: %v", err)
+		t.Fatalf("NewBioscan5MCurator failed: %v", err)
 	}
-	curator := curatorRaw.(*bioscan5MCurator)
+	curator := curatorRaw.(*Bioscan5MCurator)
 
-	rec := &extractTaxonRecord{
+	rec := &TaxonRecord{
 		Family:    "Crambidae",
 		Subfamily: "None",
 		Tribe:     "Haimbachiini",
@@ -48,8 +48,8 @@ func TestBioscanCurateBinCanonicalAdoption(t *testing.T) {
 		t.Fatalf("write input: %v", err)
 	}
 
-	if _, err := buildTaxonkit(input, output, 0, -1, extractCurationConfig{Protocol: extractCurationProtocolBioscan5M}.normalized()); err != nil {
-		t.Fatalf("buildTaxonkit failed: %v", err)
+	if _, err := BuildTaxonkit(input, output, 0, -1, CurationConfig{Protocol: ProtocolBioscan5M}.Normalized()); err != nil {
+		t.Fatalf("BuildTaxonkit failed: %v", err)
 	}
 	data, err := os.ReadFile(output)
 	if err != nil {
@@ -74,8 +74,8 @@ func TestBioscanCurateGenusMismatchFallsBackToBinProvisional(t *testing.T) {
 		t.Fatalf("write input: %v", err)
 	}
 
-	if _, err := buildTaxonkit(input, output, 0, -1, extractCurationConfig{Protocol: extractCurationProtocolBioscan5M}.normalized()); err != nil {
-		t.Fatalf("buildTaxonkit failed: %v", err)
+	if _, err := BuildTaxonkit(input, output, 0, -1, CurationConfig{Protocol: ProtocolBioscan5M}.Normalized()); err != nil {
+		t.Fatalf("BuildTaxonkit failed: %v", err)
 	}
 	data, err := os.ReadFile(output)
 	if err != nil {
@@ -101,8 +101,8 @@ func TestBioscanCurateDoesNotAdoptConflictedBinSpecies(t *testing.T) {
 		t.Fatalf("write input: %v", err)
 	}
 
-	if _, err := buildTaxonkit(input, output, 0, -1, extractCurationConfig{Protocol: extractCurationProtocolBioscan5M}.normalized()); err != nil {
-		t.Fatalf("buildTaxonkit failed: %v", err)
+	if _, err := BuildTaxonkit(input, output, 0, -1, CurationConfig{Protocol: ProtocolBioscan5M}.Normalized()); err != nil {
+		t.Fatalf("BuildTaxonkit failed: %v", err)
 	}
 	data, err := os.ReadFile(output)
 	if err != nil {
@@ -133,13 +133,13 @@ func TestBioscanReportAndAuditOutputs(t *testing.T) {
 		t.Fatalf("write input: %v", err)
 	}
 
-	cfg := extractCurationConfig{
-		Protocol:   extractCurationProtocolBioscan5M,
+	cfg := CurationConfig{
+		Protocol:   ProtocolBioscan5M,
 		ReportPath: report,
 		AuditPath:  audit,
-	}.normalized()
-	if _, err := buildTaxonkit(input, output, 0, -1, cfg); err != nil {
-		t.Fatalf("buildTaxonkit failed: %v", err)
+	}.Normalized()
+	if _, err := BuildTaxonkit(input, output, 0, -1, cfg); err != nil {
+		t.Fatalf("BuildTaxonkit failed: %v", err)
 	}
 
 	reportBytes, err := os.ReadFile(report)
@@ -150,8 +150,8 @@ func TestBioscanReportAndAuditOutputs(t *testing.T) {
 	if err := json.Unmarshal(reportBytes, &parsed); err != nil {
 		t.Fatalf("unmarshal report: %v", err)
 	}
-	if parsed.Protocol != extractCurationProtocolBioscan5M {
-		t.Fatalf("report protocol=%q want %q", parsed.Protocol, extractCurationProtocolBioscan5M)
+	if parsed.Protocol != ProtocolBioscan5M {
+		t.Fatalf("report protocol=%q want %q", parsed.Protocol, ProtocolBioscan5M)
 	}
 	if parsed.Stats.RowsTotal != 2 {
 		t.Fatalf("report rows_total=%d want 2", parsed.Stats.RowsTotal)

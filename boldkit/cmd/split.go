@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/Doomsbay/BoldKit/internal/format"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	"github.com/Doomsbay/BoldKit/internal/qc"
 	boldtaxonomy "github.com/Doomsbay/BoldKit/internal/taxonomy"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
@@ -103,7 +105,7 @@ func runSplit(args []string) {
 	qcMaxN := fs.Int("qc-max-n", 0, "QC maximum N count")
 	qcMaxAmbig := fs.Int("qc-max-ambig", 0, "QC maximum IUPAC ambiguous count")
 	qcMaxInvalid := fs.Int("qc-max-invalid", 0, "QC maximum invalid character count")
-	qcGapPolicy := fs.String("qc-gap-policy", gapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
+	qcGapPolicy := fs.String("qc-gap-policy", qc.GapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
 	qcDedupe := fs.Bool("qc-dedupe", true, "QC drop duplicate sequences")
 	qcDedupeIDs := fs.Bool("qc-dedupe-ids", true, "QC drop duplicate IDs")
 	qcProgress := fs.Bool("qc-progress", true, "Show QC progress bar (approximate)")
@@ -117,8 +119,8 @@ func runSplit(args []string) {
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
-	if *qcGapPolicy != gapPolicyDrop && *qcGapPolicy != gapPolicyMerge {
-		fatalf("qc-gap-policy must be one of: %s, %s", gapPolicyDrop, gapPolicyMerge)
+	if *qcGapPolicy != qc.GapPolicyDrop && *qcGapPolicy != qc.GapPolicyMerge {
+		fatalf("qc-gap-policy must be one of: %s, %s", qc.GapPolicyDrop, qc.GapPolicyMerge)
 	}
 	qcCfg := splitQCConfig{
 		Enabled:    *runQC,
@@ -161,7 +163,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 	if qcCfg.Enabled {
 		qcOut := filepath.Join(outDir, "qc", qcBaseName(input)+".fasta")
 		util.Logf("split: QC -> %s", qcOut)
-		if err := qcFasta(input, qcConfig{
+		if err := qc.RunQC(input, qc.Config{
 			MinLen:       qcCfg.MinLen,
 			MaxLen:       qcCfg.MaxLen,
 			MaxN:         qcCfg.MaxN,
@@ -216,7 +218,7 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 	seenTrain := filepath.Join(outDir, "seen_train.fasta")
 	formatOut := filepath.Join(outDir, "formatted")
 	util.Logf("split: format references from %s -> %s", seenTrain, formatOut)
-	if err := formatFasta(formatConfig{
+	if err := format.FormatFasta(format.FormatConfig{
 		Classifiers:  classifiers,
 		RequireRanks: ranks,
 		Input:        seenTrain,

@@ -5,27 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	boldio "github.com/Doomsbay/BoldKit/internal/io"
-	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
 )
+
+const writerBufferSize = 1 << 20
 
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
-}
-
-func outputsExist(outDir string) bool {
-	if _, err := os.Stat(outDir); err != nil {
-		return false
-	}
-	if files, _ := filepath.Glob(filepath.Join(outDir, "*.fasta")); len(files) > 0 {
-		return true
-	}
-	if files, _ := filepath.Glob(filepath.Join(outDir, "*.fasta.gz")); len(files) > 0 {
-		return true
-	}
-	return false
 }
 
 func snapshotID(inputPath string) string {
@@ -43,17 +29,4 @@ func snapshotID(inputPath string) string {
 		return strings.TrimSuffix(base, ".tsv")
 	}
 	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func updateByteProgress(bar *boldprogress.ByteProgress, counter *boldio.CountReader, last *int64) {
-	if bar == nil || counter == nil || last == nil {
-		return
-	}
-	cur := counter.Count()
-	delta := cur - *last
-	if delta <= 0 {
-		return
-	}
-	bar.Add(delta)
-	*last = cur
 }

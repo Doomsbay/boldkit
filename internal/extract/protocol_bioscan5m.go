@@ -1,4 +1,4 @@
-package cmd
+package extract
 
 import (
 	"bufio"
@@ -10,8 +10,8 @@ import (
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
-type bioscan5MCurator struct {
-	cfg            extractCurationConfig
+type Bioscan5MCurator struct {
+	cfg            CurationConfig
 	inputPath      string
 	resolver       *bioscanBinSpeciesResolver
 	binCanonical   map[string]bioscanSpeciesInfo
@@ -23,14 +23,15 @@ type bioscan5MCurator struct {
 	auditWriter    *bufio.Writer
 }
 
-func newExtractBioscan5MCurator(cfg extractCurationConfig, inputPath string) (extractCurator, error) {
-	c := &bioscan5MCurator{
+func NewBioscan5MCurator(cfg CurationConfig, inputPath string) (Curator, error) {
+	c := &Bioscan5MCurator{
 		cfg:          cfg,
 		inputPath:    inputPath,
 		resolver:     newBioscanBinSpeciesResolver(),
 		binCanonical: make(map[string]bioscanSpeciesInfo),
 	}
 	if err := c.openAudit(); err != nil {
+		_ = c.closeAudit()
 		return nil, err
 	}
 	if inputPath != "" {
@@ -42,7 +43,7 @@ func newExtractBioscan5MCurator(cfg extractCurationConfig, inputPath string) (ex
 	return c, nil
 }
 
-func (c *bioscan5MCurator) prime(inputPath string) error {
+func (c *Bioscan5MCurator) prime(inputPath string) error {
 	opts := boldio.DefaultOptions()
 	var (
 		idxBin     = -1
@@ -74,7 +75,7 @@ func (c *bioscan5MCurator) prime(inputPath string) error {
 	return nil
 }
 
-func (c *bioscan5MCurator) buildBinDecisions() {
+func (c *Bioscan5MCurator) buildBinDecisions() {
 	c.binsObserved = 0
 	c.binsCanonical = 0
 	c.binsConflicted = 0
@@ -96,7 +97,7 @@ func (c *bioscan5MCurator) buildBinDecisions() {
 	}
 }
 
-func (c *bioscan5MCurator) canonicalForBin(binURI string) (bioscanSpeciesInfo, bool) {
+func (c *Bioscan5MCurator) canonicalForBin(binURI string) (bioscanSpeciesInfo, bool) {
 	bin := bioscanNormalizeLabel(binURI)
 	if bin == "" {
 		return bioscanSpeciesInfo{}, false
@@ -108,7 +109,7 @@ func (c *bioscan5MCurator) canonicalForBin(binURI string) (bioscanSpeciesInfo, b
 	return info, true
 }
 
-func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
+func (c *Bioscan5MCurator) Curate(rec *TaxonRecord) error {
 	if rec == nil {
 		return nil
 	}
@@ -214,8 +215,8 @@ func (c *bioscan5MCurator) Curate(rec *extractTaxonRecord) error {
 	return nil
 }
 
-func (c *bioscan5MCurator) Close() error {
-	util.Logf("extract (%s): bins-observed=%d bins-canonical=%d bins-conflicted=%d", extractCurationProtocolBioscan5M, c.binsObserved, c.binsCanonical, c.binsConflicted)
+func (c *Bioscan5MCurator) Close() error {
+	util.Logf("extract (%s): bins-observed=%d bins-canonical=%d bins-conflicted=%d", ProtocolBioscan5M, c.binsObserved, c.binsCanonical, c.binsConflicted)
 	var firstErr error
 	if err := c.writeReport(); err != nil && firstErr == nil {
 		firstErr = err

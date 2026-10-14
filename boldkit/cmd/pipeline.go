@@ -15,7 +15,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Doomsbay/BoldKit/internal/extract"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	"github.com/Doomsbay/BoldKit/internal/markers"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -36,18 +38,18 @@ func runPipeline(args []string) {
 	skipManifest := fs.Bool("skip-manifest", false, "Skip manifest.json (only when --package)")
 	skipChecksums := fs.Bool("skip-checksums", false, "Skip SHA256SUMS.txt (only when --package)")
 	snapshot := fs.String("snapshot-id", "", "Snapshot ID suffix for releases (default: derive from input filename)")
-	extractCurateProtocol := fs.String("extract-curate-protocol", extractCurationProtocolNone, "Extraction curation profile (none,bioscan-5m)")
+	extractCurateProtocol := fs.String("extract-curate-protocol", extract.ProtocolNone, "Extraction curation profile (none,bioscan-5m)")
 	extractCurateReport := fs.String("extract-curate-report", "", "Optional extraction curation JSON report path")
 	extractCurateAudit := fs.String("extract-curate-audit", "", "Optional extraction curation audit TSV path")
 	if err := fs.Parse(args); err != nil {
 		fatalf("parse args failed: %v", err)
 	}
-	extractCfg := extractCurationConfig{
+	extractCfg := extract.CurationConfig{
 		Protocol:   *extractCurateProtocol,
 		ReportPath: *extractCurateReport,
 		AuditPath:  *extractCurateAudit,
-	}.normalized()
-	if err := extractCfg.validate(); err != nil {
+	}.Normalized()
+	if err := extractCfg.Validate(); err != nil {
 		fatalf("invalid extraction curation config: %v", err)
 	}
 
@@ -70,18 +72,18 @@ func runPipeline(args []string) {
 		reportEvery = 1
 	}
 
-	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap, extractCfg, parseMarkerSelection(*markersFilter)); err != nil {
+	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap, extractCfg, markers.ParseSelection(*markersFilter)); err != nil {
 		fatalf("pipeline failed: %v", err)
 	}
 }
 
-func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extractCurationConfig, selected [][]byte) error {
+func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extract.CurationConfig, selected [][]byte) error {
 	util.Logf("Input format: %s", boldio.InputFormat(input))
 	util.Logf("Extract taxonomy -> %s", taxonkitOut)
 	if boldio.FileExists(taxonkitOut) && !force {
 		util.Logf("taxonkit TSV exists, skipping (use --force to overwrite): %s", taxonkitOut)
 	} else {
-		if _, err := buildTaxonkit(input, taxonkitOut, reportEvery, totalRows, extractCfg); err != nil {
+		if _, err := extract.BuildTaxonkit(input, taxonkitOut, reportEvery, totalRows, extractCfg); err != nil {
 			return fmt.Errorf("build taxonkit TSV: %w", err)
 		}
 	}
@@ -92,17 +94,14 @@ func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin
 	}
 
 	util.Logf("Build marker FASTAs -> %s", markerDir)
-	selected, skipMarkers, err := selectMissingMarkers(markerDir, selected, force)
+	selected, skipMarkers, err := markers.SelectMissing(markerDir, selected, force)
 	if err != nil {
 		return fmt.Errorf("check marker outputs: %w", err)
 	}
 	if skipMarkers {
 		util.Logf("marker FASTAs exist, skipping (use --force to overwrite): %s", markerDir)
 	} else {
-		if err := os.MkdirAll(markerDir, 0o755); err != nil {
-			return fmt.Errorf("create marker output dir: %w", err)
-		}
-		if err := buildMarkerFastas(input, markerDir, gzipOut, reportEvery, totalRows, workers, selected); err != nil {
+		if err := markers.BuildMarkerFastas(input, markerDir, gzipOut, reportEvery, totalRows, workers, selected); err != nil {
 			return fmt.Errorf("build markers: %w", err)
 		}
 	}

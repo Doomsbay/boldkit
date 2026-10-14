@@ -23,23 +23,24 @@ Build NCBI-style taxonomy databases and marker-specific FASTA reference sets fro
 ## Quick start (bash pipeline)
 ```bash
 # Use your snapshot path
-bash bolddb-taxdump.sh --input ./BOLD_Public.*/BOLD_Public.*.tsv
+bash boldkit.sh --input ./BOLD_Public.*/BOLD_Public.*.tsv
 
 # Add packaging (zips, manifest, checksums)
-bash bolddb-taxdump.sh \
+bash boldkit.sh \
   --input ./BOLD_Public.*/BOLD_Public.*.tsv \
   --package
-
-# Add BoldKit binaries to the release folder
-bash bolddb-taxdump.sh \
-  --input ./BOLD_Public.*/BOLD_Public.*.tsv \
-  --package \
-  --package-binaries
 ```
 Note: BOLD snapshots are very large; processing can take a long time.
 
 ## BoldKit CLI (Go)
 If you prefer the Go tools for speed, download or build the BoldKit binary and see the GitHub wiki for commands and parameters. The bash pipeline does not require Go.
+
+Build from source with Go 1.24.9 or newer:
+
+```bash
+make build
+./dist/boldkit --help
+```
 
 Wiki pages:
 - [Download](https://github.com/Doomsbay/boldkit/wiki/Download)
@@ -50,7 +51,7 @@ Wiki pages:
 - [FAQ](https://github.com/Doomsbay/boldkit/wiki/FAQ)
 
 ## Pipeline workflow
-`bolddb-taxdump.sh` runs:
+`boldkit.sh` runs:
 1) Extract taxonomy to `taxonkit_input.tsv`.
 2) Build taxdump using taxonkit(`nodes.dmp`, `names.dmp`, `taxid.map`).
 3) Build marker FASTAs (`marker_fastas/*.fasta.gz`).
@@ -62,11 +63,13 @@ Manual equivalents live in `scripts/01`–`06`.
 
 For `boldkit markers` and `boldkit pipeline`, an explicit `-markers COI-5P,MATK` selection builds only markers whose FASTAs are missing. Existing `.fasta` or `.fasta.gz` files are recognized case-insensitively and preserved; use `-force` to rebuild the selected markers. For example, `boldkit markers -input snapshot.tsv -outdir marker_fastas -markers MATK` adds MATK even when COI-5P already exists. With no marker selection, the existing directory-wide skip behavior still applies.
 
+Marker FASTAs include every selected record, including empty sequences, and preserve gaps, N, and IUPAC ambiguity codes. Sequence filtering belongs to `qc`, `classify`, and `split`. QC drops gapped records by default; use `-gap-policy merge` for `qc` or `-qc-gap-policy merge` for `classify` and `split` to remove gaps and join the flanking sequence. Marker outputs are published together after successful writing; a failure restores existing outputs.
+
 ## Open/closed-world library workflow
 Use `boldkit split` to run QC, open/closed-world partitioning, taxdump pruning, and classifier library formatting.
 
 ```bash
-./bin/boldkit split \
+./dist/boldkit split \
   -marker-dir marker_fastas \
   -markers COI-5P \
   -outdir libraries
