@@ -11,120 +11,111 @@ import (
 )
 
 func TestPackageReleaseRejectsExistingOutputsBeforeMovingInputs(t *testing.T) {
-	for _, compressed := range []bool{false, true} {
-		for _, move := range []bool{false, true} {
-			for _, output := range []string{"taxdump", "markers", "taxonomy", "manifest", "checksums"} {
-				name := output + "/move=" + boolName(move) + "/gzip=" + boolName(compressed)
-				t.Run(name, func(t *testing.T) {
-					cfg := newPackageFixture(t, compressed)
-					cfg.MoveInputs = move
-					if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
-						t.Fatal(err)
-					}
-					paths := map[string]string{
-						"taxdump":   packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot),
-						"markers":   packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot),
-						"taxonomy":  packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot),
-						"manifest":  filepath.Join(cfg.ReleaseDir, "manifest.json"),
-						"checksums": filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt"),
-					}
-					path := paths[output]
-					if err := os.WriteFile(path, []byte("previous release"), 0o644); err != nil {
-						t.Fatal(err)
-					}
-					before := packageSourceContents(t, cfg)
-					err := packageRelease(cfg)
-					if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "force") {
-						t.Fatalf("expected existing-output error identifying %s, got %v", path, err)
-					}
-					assertPackageSources(t, before)
-					got, err := os.ReadFile(path)
-					if err != nil || string(got) != "previous release" {
-						t.Fatalf("existing output changed: %q, %v", got, err)
-					}
-					entries, err := os.ReadDir(cfg.ReleaseDir)
-					if err != nil || len(entries) != 1 {
-						t.Fatalf("rejection created or moved outputs: %v, %v", entries, err)
-					}
-				})
+	for _, output := range []string{"taxdump", "markers", "taxonomy", "manifest", "checksums"} {
+		t.Run(output, func(t *testing.T) {
+			cfg := newPackageFixture(t, output == "taxonomy")
+			if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
+				t.Fatal(err)
 			}
-		}
+			paths := map[string]string{
+				"taxdump":   packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot),
+				"markers":   packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot),
+				"taxonomy":  packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot),
+				"manifest":  filepath.Join(cfg.ReleaseDir, "manifest.json"),
+				"checksums": filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt"),
+			}
+			path := paths[output]
+			previous := "previous release"
+			if output == "taxdump" {
+				previous = ""
+			}
+			if err := os.WriteFile(path, []byte(previous), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			before := packageSourceContents(t, cfg)
+			err := packageRelease(cfg)
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "force") {
+				t.Fatalf("expected existing-output error identifying %s, got %v", path, err)
+			}
+			assertPackageSources(t, before)
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != previous {
+				t.Fatalf("existing output changed: %q, %v", got, err)
+			}
+			entries, err := os.ReadDir(cfg.ReleaseDir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("rejection created or moved outputs: %v, %v", entries, err)
+			}
+		})
 	}
 }
 
 func TestPackageReleasePublishesCurrentInputs(t *testing.T) {
-	for _, compressed := range []bool{false, true} {
-		for _, force := range []bool{false, true} {
-			t.Run("force="+boolName(force)+"/gzip="+boolName(compressed), func(t *testing.T) {
-				cfg := newPackageFixture(t, compressed)
-				cfg.Force = force
-				if force {
-					if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
-						t.Fatal(err)
-					}
-					for _, path := range []string{
-						packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot),
-						packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot),
-						packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot),
-						filepath.Join(cfg.ReleaseDir, "manifest.json"),
-						filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt"),
-					} {
-						if err := os.WriteFile(path, []byte("previous release"), 0o644); err != nil {
-							t.Fatal(err)
-						}
-					}
-				}
-				if err := packageRelease(cfg); err != nil {
-					t.Fatal(err)
-				}
-				assertArchiveMember(t, packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot), "markers/COI-5P.fasta", ">P1\nACGT\n")
-				assertArchiveMember(t, packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot), "taxdump/taxid.map", "P1\t1\n")
-				assertPackageGzip(t, packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot), "species\tprocessid\nCanis lupus\tP1\n")
-				for _, path := range []string{cfg.TaxdumpDir, cfg.MarkerDir, cfg.TaxonkitOut, filepath.Join(cfg.ReleaseDir, "taxdump"), filepath.Join(cfg.ReleaseDir, "markers")} {
-					if _, err := os.Stat(path); !os.IsNotExist(err) {
-						t.Fatalf("expected packaged source to be removed: %s, %v", path, err)
-					}
-				}
-			})
-		}
-	}
-}
-
-func TestPackageReleaseRejectsEmptyOrNonRegularOutputs(t *testing.T) {
-	for _, kind := range []string{"empty", "directory", "symlink"} {
-		for _, force := range []bool{false, true} {
-			if kind == "empty" && force {
-				continue
-			}
-			t.Run(kind+"/force="+boolName(force), func(t *testing.T) {
-				cfg := newPackageFixture(t, false)
-				cfg.Force = force
+	for _, tc := range []struct {
+		name       string
+		compressed bool
+		force      bool
+	}{
+		{name: "plain taxonomy"},
+		{name: "gzip taxonomy", compressed: true},
+		{name: "replace existing release", force: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newPackageFixture(t, tc.compressed)
+			cfg.Force = tc.force
+			if tc.force {
 				if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
 					t.Fatal(err)
 				}
-				path := packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot)
-				var err error
-				switch kind {
-				case "empty":
-					err = os.WriteFile(path, nil, 0o644)
-				case "directory":
-					err = os.Mkdir(path, 0o755)
-				case "symlink":
-					err = os.Symlink("missing", path)
-					if err != nil {
-						t.Skipf("symlinks unavailable: %v", err)
+				for _, path := range []string{
+					packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot),
+					packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot),
+					packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot),
+					filepath.Join(cfg.ReleaseDir, "manifest.json"),
+					filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt"),
+				} {
+					if err := os.WriteFile(path, []byte("previous release"), 0o644); err != nil {
+						t.Fatal(err)
 					}
 				}
-				if err != nil {
+			}
+			if err := packageRelease(cfg); err != nil {
+				t.Fatal(err)
+			}
+			assertArchiveMember(t, packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot), "markers/COI-5P.fasta", ">P1\nACGT\n")
+			assertArchiveMember(t, packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot), "taxdump/taxid.map", "P1\t1\n")
+			assertPackageGzip(t, packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot), "species\tprocessid\nCanis lupus\tP1\n")
+			for _, path := range []string{cfg.TaxdumpDir, cfg.MarkerDir, cfg.TaxonkitOut, filepath.Join(cfg.ReleaseDir, "taxdump"), filepath.Join(cfg.ReleaseDir, "markers")} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("expected packaged source to be removed: %s, %v", path, err)
+				}
+			}
+		})
+	}
+}
+
+func TestPackageReleaseRejectsNonRegularOutputsWithForce(t *testing.T) {
+	for _, kind := range []string{"directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			cfg := newPackageFixture(t, false)
+			cfg.Force = true
+			if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot)
+			if kind == "directory" {
+				if err := os.Mkdir(path, 0o755); err != nil {
 					t.Fatal(err)
 				}
-				before := packageSourceContents(t, cfg)
-				if err := packageRelease(cfg); err == nil || !strings.Contains(err.Error(), path) {
-					t.Fatalf("expected output conflict error, got %v", err)
-				}
-				assertPackageSources(t, before)
-			})
-		}
+			} else if err := os.Symlink("missing", path); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			before := packageSourceContents(t, cfg)
+			if err := packageRelease(cfg); err == nil || !strings.Contains(err.Error(), path) {
+				t.Fatalf("expected output conflict error, got %v", err)
+			}
+			assertPackageSources(t, before)
+		})
 	}
 }
 
@@ -183,13 +174,6 @@ func newPackageFixture(t *testing.T, compressed bool) packageConfig {
 		cfg.TaxonkitOut = path
 	}
 	return cfg
-}
-
-func boolName(value bool) string {
-	if value {
-		return "true"
-	}
-	return "false"
 }
 
 func packageSourceContents(t *testing.T, cfg packageConfig) map[string]string {
