@@ -99,6 +99,8 @@ releases/
 ```
 When `--package` is set in the Go pipeline, the generated folders are moved under `releases/` before compression and removed after packaging completes.
 
+The Go `package` command and `pipeline -package` check release output paths before moving inputs. Existing archives, taxonomy gzip files, or enabled manifest/checksum outputs cause an error; use `-force` to rebuild them from the current inputs. Source files stay in place when this check rejects an existing output.
+
 ## How taxonomy is constructed
 Ranks: `kingdom -> phylum -> class -> order -> family -> subfamily -> tribe -> genus -> species`
 - Missing intermediate ranks are skipped.

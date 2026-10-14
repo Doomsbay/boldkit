@@ -62,6 +62,9 @@ func runPackage(args []string) {
 
 func packageRelease(cfg packageConfig) error {
 	util.Logf("Packaging release artifacts -> %s", cfg.ReleaseDir)
+	if err := checkPackageOutputs(cfg); err != nil {
+		return fmt.Errorf("check release outputs: %w", err)
+	}
 	if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
 		return fmt.Errorf("create releases dir: %w", err)
 	}
@@ -147,6 +150,39 @@ func packageRelease(cfg packageConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func checkPackageOutputs(cfg packageConfig) error {
+	paths := []string{
+		packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot),
+		packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot),
+	}
+	taxonkitGz := packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot)
+	if !strings.HasSuffix(cfg.TaxonkitOut, ".gz") || filepath.Clean(cfg.TaxonkitOut) != filepath.Clean(taxonkitGz) {
+		paths = append(paths, taxonkitGz)
+	}
+	if !cfg.SkipManifest {
+		paths = append(paths, filepath.Join(cfg.ReleaseDir, "manifest.json"))
+	}
+	if !cfg.SkipChecksums {
+		paths = append(paths, filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt"))
+	}
+	for _, path := range paths {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect %s: %w", path, err)
+		}
+		if !cfg.Force {
+			return fmt.Errorf("release output exists (use --force to overwrite): %s", path)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("release output is not a regular file: %s", path)
+		}
+	}
 	return nil
 }
 
