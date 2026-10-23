@@ -68,20 +68,9 @@ func RunQC(input string, cfg Config) error {
 		bar = boldprogress.NewByte(total, "qc (approx)")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
-		return fmt.Errorf("create output dir: %w", err)
+	if err := rejectAliasedOutput(input, cfg.OutputPath); err != nil {
+		return fmt.Errorf("validate output: %w", err)
 	}
-	out, err := os.Create(cfg.OutputPath)
-	if err != nil {
-		return fmt.Errorf("create output: %w", err)
-	}
-	writer := bufio.NewWriterSize(out, writerBufferSize)
-	committed := false
-	defer func() {
-		if !committed {
-			_ = out.Close()
-		}
-	}()
 
 	var taxidMap map[string]int
 	var dump *boldtaxonomy.TaxDump
@@ -103,6 +92,21 @@ func RunQC(input string, cfg Config) error {
 			return err
 		}
 	}
+
+	if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+	out, err := os.Create(cfg.OutputPath)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+	writer := bufio.NewWriterSize(out, writerBufferSize)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = out.Close()
+		}
+	}()
 
 	stats := Stats{}
 	seenSeqs := make(map[string]struct{})
@@ -242,6 +246,39 @@ type SeqCounts struct {
 	Ambig   int
 	Invalid int
 	Gapped  int
+}
+
+func rejectAliasedOutput(input, output string) error {
+	same := filepath.Clean(input) == filepath.Clean(output)
+	if !same {
+		inAbs, err := filepath.Abs(input)
+		if err != nil {
+			return fmt.Errorf("resolve input path: %w", err)
+		}
+		outAbs, err := filepath.Abs(output)
+		if err != nil {
+			return fmt.Errorf("resolve output path: %w", err)
+		}
+		same = inAbs == outAbs
+	}
+	if !same {
+		inInfo, err := os.Stat(input)
+		if err != nil {
+			return fmt.Errorf("stat input: %w", err)
+		}
+		outInfo, err := os.Stat(output)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("stat output: %w", err)
+			}
+		} else {
+			same = os.SameFile(inInfo, outInfo)
+		}
+	}
+	if same {
+		return fmt.Errorf("output %q refers to the input FASTA", output)
+	}
+	return nil
 }
 
 func CleanSequence(seq []byte) ([]byte, SeqCounts) {
