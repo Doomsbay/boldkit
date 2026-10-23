@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.0]
+
+### Added
+- `-markers` flag on `markers` and `pipeline` to select a case-insensitive subset of markers (e.g. `COI-5P,MATK`); empty selects all, zero-match selections warn.
+- `-gap-policy drop|merge` QC setting for gap handling with report counts; gaps are preserved verbatim through the marker stage and QC alone owns sequence filtering.
+
+### Fixed
+- Packaging now rejects existing release outputs without `-force` and preserves input files when publication fails (all-or-nothing with `.bak` restore).
+- Per-marker skip when FASTA outputs already exist; zero-match marker warnings are now accurate.
+- QC rejects output paths that alias the input FASTA — direct paths, absolute spelling variants, symlinks, and hard links — instead of truncating the input and reporting success.
+- QC taxonomy-config failures (missing `taxid.map` / taxdump) no longer erase an existing output file.
+
+### Changed
+- Command logic moved from `cmd/` into `internal/` packages: `util`, `io`, `progress`, `taxonomy`, `markers`, `extract`, `qc`, and `format`.
+- `markers` is now a faithful projection: every record of a selected marker is written (empty/null sequences become empty FASTA records).
+
 ## [v0.5.0]
 
 ### Added
