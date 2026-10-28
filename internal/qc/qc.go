@@ -16,6 +16,7 @@ import (
 const (
 	GapPolicyDrop  = "drop"
 	GapPolicyMerge = "merge"
+	GapPolicyKeep  = "keep"
 )
 
 const writerBufferSize = 1 << 20
@@ -50,6 +51,8 @@ type Stats struct {
 	Gapped         int `json:"gapped"`
 	DupeSeq        int `json:"duplicate_sequence"`
 	DupeID         int `json:"duplicate_id"`
+	TerminalN      int `json:"terminal_n"`
+	PaddedRecords  int `json:"padded_records"`
 }
 
 func RunQC(input string, cfg Config) error {
@@ -140,23 +143,23 @@ func RunQC(input string, cfg Config) error {
 			}
 		}
 
-		clean, counts := CleanSequence(rec.Seq)
+		clean, counts := cleanSequence(cfg.GapPolicy, rec.Seq)
 		if cfg.GapPolicy == GapPolicyDrop && counts.Gapped > 0 {
 			stats.Gapped++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
-		if len(clean) == 0 {
+		if counts.Bases == 0 {
 			stats.TooShort++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
-		if cfg.MinLen > 0 && len(clean) < cfg.MinLen {
+		if cfg.MinLen > 0 && counts.Bases < cfg.MinLen {
 			stats.TooShort++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
 		}
-		if cfg.MaxLen > 0 && len(clean) > cfg.MaxLen {
+		if cfg.MaxLen > 0 && counts.Bases > cfg.MaxLen {
 			stats.TooLong++
 			updateByteProgress(bar, counter, &lastCount)
 			return nil
@@ -212,6 +215,12 @@ func RunQC(input string, cfg Config) error {
 			return fmt.Errorf("write newline: %w", err)
 		}
 		stats.Written++
+		if counts.TerminalN > 0 {
+			stats.TerminalN += counts.TerminalN
+		}
+		if counts.TerminalConverted > 0 {
+			stats.PaddedRecords++
+		}
 		updateByteProgress(bar, counter, &lastCount)
 		return nil
 	})
@@ -242,10 +251,13 @@ func RunQC(input string, cfg Config) error {
 }
 
 type SeqCounts struct {
-	N       int
-	Ambig   int
-	Invalid int
-	Gapped  int
+	N                 int
+	Ambig             int
+	Invalid           int
+	Gapped            int
+	Bases             int
+	TerminalN         int
+	TerminalConverted int
 }
 
 func rejectAliasedOutput(input, output string) error {
@@ -281,6 +293,22 @@ func rejectAliasedOutput(input, output string) error {
 	return nil
 }
 
+func ValidateGapPolicy(policy string) error {
+	switch policy {
+	case GapPolicyDrop, GapPolicyMerge, GapPolicyKeep:
+		return nil
+	default:
+		return fmt.Errorf("gap-policy must be one of: %s, %s, %s", GapPolicyDrop, GapPolicyMerge, GapPolicyKeep)
+	}
+}
+
+func cleanSequence(gapPolicy string, seq []byte) ([]byte, SeqCounts) {
+	if gapPolicy == GapPolicyKeep {
+		return CleanSequenceKeep(seq)
+	}
+	return CleanSequence(seq)
+}
+
 func CleanSequence(seq []byte) ([]byte, SeqCounts) {
 	clean := make([]byte, 0, len(seq))
 	counts := SeqCounts{}
@@ -304,7 +332,78 @@ func CleanSequence(seq []byte) ([]byte, SeqCounts) {
 			counts.Invalid++
 		}
 	}
+	counts.Bases = len(clean)
 	return clean, counts
+}
+
+func CleanSequenceKeep(seq []byte) ([]byte, SeqCounts) {
+	clean := make([]byte, 0, len(seq))
+	for _, c := range seq {
+		if c == '\r' || c == '\n' || c == '\t' || c == ' ' {
+			continue
+		}
+		if c >= 'a' && c <= 'z' {
+			c -= 32
+		}
+		clean = append(clean, c)
+	}
+	counts := SeqCounts{}
+
+	left := 0
+	for left < len(clean) && !isACGTBase(clean[left]) {
+		left++
+	}
+	right := len(clean)
+	for right > left && !isACGTBase(clean[right-1]) {
+		right--
+	}
+
+	for i := 0; i < left; i++ {
+		countTerminal(clean, i, &counts)
+	}
+	for i := right; i < len(clean); i++ {
+		countTerminal(clean, i, &counts)
+	}
+
+	for i := left; i < right; i++ {
+		switch c := clean[i]; {
+		case isACGTBase(c):
+			counts.Bases++
+		case c == 'N':
+			counts.N++
+		case c == '-':
+			counts.Gapped++
+		case isIUPACAmbig(c):
+			counts.Ambig++
+		default:
+			clean[i] = 'N'
+			counts.Invalid++
+		}
+	}
+	return clean, counts
+}
+
+func countTerminal(clean []byte, i int, counts *SeqCounts) {
+	counts.TerminalN++
+	if clean[i] == '-' {
+		counts.Gapped++
+	}
+	if clean[i] != 'N' {
+		clean[i] = 'N'
+		counts.TerminalConverted++
+	}
+}
+
+func isACGTBase(c byte) bool {
+	return c == 'A' || c == 'C' || c == 'G' || c == 'T'
+}
+
+func isIUPACAmbig(c byte) bool {
+	switch c {
+	case 'R', 'Y', 'S', 'W', 'K', 'M', 'B', 'D', 'H', 'V':
+		return true
+	}
+	return false
 }
 
 func WriteReport(path string, stats Stats) error {

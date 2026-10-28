@@ -105,7 +105,7 @@ func runSplit(args []string) {
 	qcMaxN := fs.Int("qc-max-n", 0, "QC maximum N count")
 	qcMaxAmbig := fs.Int("qc-max-ambig", 0, "QC maximum IUPAC ambiguous count")
 	qcMaxInvalid := fs.Int("qc-max-invalid", 0, "QC maximum invalid character count")
-	qcGapPolicy := fs.String("qc-gap-policy", qc.GapPolicyDrop, "QC gap handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
+	qcGapPolicy := fs.String("qc-gap-policy", qc.GapPolicyDrop, "QC gap handling: drop records containing gaps, merge across gaps (remove gaps, join flanks), or keep the alignment frame (terminal gaps become N, internal gaps preserved)")
 	qcDedupe := fs.Bool("qc-dedupe", true, "QC drop duplicate sequences")
 	qcDedupeIDs := fs.Bool("qc-dedupe-ids", true, "QC drop duplicate IDs")
 	qcProgress := fs.Bool("qc-progress", true, "Show QC progress bar (approximate)")
@@ -119,8 +119,8 @@ func runSplit(args []string) {
 	if len(classifierList) == 0 {
 		fatalf("classifier must not be empty")
 	}
-	if *qcGapPolicy != qc.GapPolicyDrop && *qcGapPolicy != qc.GapPolicyMerge {
-		fatalf("qc-gap-policy must be one of: %s, %s", qc.GapPolicyDrop, qc.GapPolicyMerge)
+	if err := qc.ValidateGapPolicy(*qcGapPolicy); err != nil {
+		fatalf("%v", err)
 	}
 	qcCfg := splitQCConfig{
 		Enabled:    *runQC,

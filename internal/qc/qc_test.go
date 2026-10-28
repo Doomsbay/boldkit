@@ -290,6 +290,183 @@ func TestQCAcceptsDistinctOutputWithGzipInput(t *testing.T) {
 	}
 }
 
+func TestQCKeepPreservesAlignmentFrame(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\n---ACGT-AA---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "clean.fasta")
+	report := filepath.Join(dir, "report.json")
+	cfg := Config{
+		GapPolicy:  GapPolicyKeep,
+		OutputPath: output,
+		ReportPath: report,
+	}
+	if err := RunQC(input, cfg); err != nil {
+		t.Fatalf("RunQC: %v", err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := ">P1\nNNNACGT-AANNN\n"; string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	stats := readQCStats(t, report)
+	if stats.Written != 1 || stats.TerminalN != 6 || stats.PaddedRecords != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestQCKeepExemptsTerminalRunsFromThresholds(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	content := ">P1\nNNNNACGTNACGTNNNN\n>P2\nNNNNACGTNNACGTNNNN\n>P3\nRYACGT\n"
+	if err := os.WriteFile(input, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "clean.fasta")
+	report := filepath.Join(dir, "report.json")
+	cfg := Config{
+		GapPolicy:  GapPolicyKeep,
+		MaxN:       1,
+		MaxAmbig:   0,
+		OutputPath: output,
+		ReportPath: report,
+	}
+	if err := RunQC(input, cfg); err != nil {
+		t.Fatalf("RunQC: %v", err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ">P1\nNNNNACGTNACGTNNNN\n>P3\nNNACGT\n"
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	stats := readQCStats(t, report)
+	if stats.Written != 2 || stats.TooManyN != 1 || stats.TooManyAmbig != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if stats.TerminalN != 10 || stats.PaddedRecords != 1 {
+		t.Fatalf("unexpected padding stats: %+v", stats)
+	}
+}
+
+func TestQCKeepMinLengthCountsBases(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nNNNNN-ATGC-NNNNN\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := filepath.Join(dir, "report.json")
+	cfg := Config{
+		GapPolicy:  GapPolicyKeep,
+		MinLen:     6,
+		OutputPath: filepath.Join(dir, "clean.fasta"),
+		ReportPath: report,
+	}
+	if err := RunQC(input, cfg); err != nil {
+		t.Fatalf("RunQC: %v", err)
+	}
+	stats := readQCStats(t, report)
+	if stats.TooShort != 1 || stats.Written != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestQCKeepConvertsInvalidToN(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nACG*T\n>P2\nA**GT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "clean.fasta")
+	report := filepath.Join(dir, "report.json")
+	cfg := Config{
+		GapPolicy:  GapPolicyKeep,
+		MaxInvalid: 1,
+		OutputPath: output,
+		ReportPath: report,
+	}
+	if err := RunQC(input, cfg); err != nil {
+		t.Fatalf("RunQC: %v", err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := ">P1\nACGNT\n"; string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	stats := readQCStats(t, report)
+	if stats.Written != 1 || stats.TooManyInvalid != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestQCKeepAllAmbiguousRecordTooShort(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\n------\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := filepath.Join(dir, "report.json")
+	cfg := Config{
+		GapPolicy:  GapPolicyKeep,
+		OutputPath: filepath.Join(dir, "clean.fasta"),
+		ReportPath: report,
+	}
+	if err := RunQC(input, cfg); err != nil {
+		t.Fatalf("RunQC: %v", err)
+	}
+	stats := readQCStats(t, report)
+	if stats.TooShort != 1 || stats.Written != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestQCDropAndMergeOutputsUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		policy  string
+		output  string
+		written int
+		gapped  int
+	}{
+		{GapPolicyDrop, "", 0, 1},
+		{GapPolicyMerge, ">P1\nACGTAA\n", 1, 0},
+	} {
+		dir := t.TempDir()
+		input := filepath.Join(dir, "input.fasta")
+		if err := os.WriteFile(input, []byte(">P1\n---ACGT-AA---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		output := filepath.Join(dir, "clean.fasta")
+		report := filepath.Join(dir, "report.json")
+		cfg := Config{
+			GapPolicy:  tc.policy,
+			OutputPath: output,
+			ReportPath: report,
+		}
+		if err := RunQC(input, cfg); err != nil {
+			t.Fatalf("RunQC(%s): %v", tc.policy, err)
+		}
+		got, err := os.ReadFile(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.output {
+			t.Fatalf("policy %s: got %q, want %q", tc.policy, got, tc.output)
+		}
+		stats := readQCStats(t, report)
+		if stats.Written != tc.written || stats.Gapped != tc.gapped {
+			t.Fatalf("policy %s: unexpected stats: %+v", tc.policy, stats)
+		}
+	}
+}
+
 func readQCStats(t *testing.T, report string) Stats {
 	t.Helper()
 	data, err := os.ReadFile(report)

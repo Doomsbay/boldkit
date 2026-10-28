@@ -19,7 +19,7 @@ func runQC(args []string) {
 	maxN := fs.Int("max-n", -1, "Maximum N count allowed (-1 disables)")
 	maxAmbig := fs.Int("max-ambig", -1, "Maximum IUPAC ambiguous count allowed (-1 disables)")
 	maxInvalid := fs.Int("max-invalid", 0, "Maximum invalid character count allowed")
-	gapPolicy := fs.String("gap-policy", qc.GapPolicyDrop, "Gap character handling: drop records containing gaps, or merge across gaps (remove gaps, join flanks)")
+	gapPolicy := fs.String("gap-policy", qc.GapPolicyDrop, "Gap character handling: drop records containing gaps, merge across gaps (remove gaps, join flanks), or keep the alignment frame (terminal gaps become N, internal gaps preserved)")
 	dedupeSeqs := fs.Bool("dedupe", true, "Drop duplicate sequences (cleaned)")
 	dedupeIDs := fs.Bool("dedupe-ids", true, "Drop duplicate sequence IDs")
 	progressOn := fs.Bool("progress", true, "Show progress bar (approximate)")
@@ -40,8 +40,8 @@ func runQC(args []string) {
 	if *maxInvalid < 0 {
 		fatalf("max-invalid must be >= 0")
 	}
-	if *gapPolicy != qc.GapPolicyDrop && *gapPolicy != qc.GapPolicyMerge {
-		fatalf("gap-policy must be one of: %s, %s", qc.GapPolicyDrop, qc.GapPolicyMerge)
+	if err := qc.ValidateGapPolicy(*gapPolicy); err != nil {
+		fatalf("%v", err)
 	}
 
 	cfg := qc.Config{
