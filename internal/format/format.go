@@ -18,6 +18,30 @@ import (
 
 const writerBufferSize = 1 << 20
 
+var supportedClassifiers = []string{"blast", "kraken2", "sintax", "rdp", "idtaxa", "protax"}
+
+func ValidateClassifiers(classifiers []string) error {
+	known := make(map[string]struct{}, len(supportedClassifiers))
+	for _, c := range supportedClassifiers {
+		known[c] = struct{}{}
+	}
+	selected := 0
+	for _, c := range classifiers {
+		name := strings.ToLower(strings.TrimSpace(c))
+		if name == "" {
+			continue
+		}
+		if _, ok := known[name]; !ok {
+			return fmt.Errorf("unsupported classifier %q (supported: %s)", name, strings.Join(supportedClassifiers, ","))
+		}
+		selected++
+	}
+	if selected == 0 {
+		return fmt.Errorf("classifier must not be empty (supported: %s)", strings.Join(supportedClassifiers, ","))
+	}
+	return nil
+}
+
 type FormatConfig struct {
 	Classifiers  []string
 	RequireRanks []string
@@ -55,6 +79,10 @@ type formatWriters struct {
 }
 
 func FormatFasta(cfg FormatConfig) error {
+	if err := ValidateClassifiers(cfg.Classifiers); err != nil {
+		return err
+	}
+
 	in, counter, err := boldio.OpenInputWithCounter(cfg.Input)
 	if err != nil {
 		return fmt.Errorf("open input: %w", err)

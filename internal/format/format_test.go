@@ -11,6 +11,40 @@ import (
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
+func TestFormatFastaRejectsUnknownClassifierBeforeCreatingOutput(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "formatted")
+	for _, classifiers := range [][]string{
+		{"dnasketch"},
+		{"blast", "dnasketch"},
+		{"blast", ""},
+	} {
+		cfg := FormatConfig{
+			Classifiers: classifiers,
+			Input:       filepath.Join(dir, "input.fasta"),
+			OutDir:      outDir,
+		}
+		if err := FormatFasta(cfg); err == nil {
+			t.Fatalf("classifiers %v: expected error", classifiers)
+		}
+		if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+			t.Fatalf("classifiers %v: output directory was created", classifiers)
+		}
+	}
+}
+
+func TestValidateClassifiersAcceptsCaseVariants(t *testing.T) {
+	for _, classifiers := range [][]string{
+		{"BLAST"},
+		{"Blast", "Kraken2"},
+		{"sintax", "rdp", "idtaxa", "protax"},
+	} {
+		if err := ValidateClassifiers(classifiers); err != nil {
+			t.Fatalf("classifiers %v: %v", classifiers, err)
+		}
+	}
+}
+
 func TestOpenFormatWritersClosesFilesOnSetupError(t *testing.T) {
 	if _, err := os.ReadDir("/proc/self/fd"); err != nil {
 		t.Skip("file descriptor inspection unavailable")
