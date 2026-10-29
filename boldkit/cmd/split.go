@@ -43,6 +43,8 @@ type splitStats struct {
 	UnseenKey        int `json:"keys_unseen_records"`
 	HeldoutRecords   int `json:"other_heldout_records"`
 	PretrainRecords  int `json:"pretrain_records"`
+	ConflictGroups   int `json:"conflict_groups"`
+	ConflictRecords  int `json:"conflict_records"`
 }
 
 type splitReport struct {
@@ -86,6 +88,12 @@ type splitPlan struct {
 type splitTarget struct {
 	bucket string
 	target int
+}
+
+type conflictReport struct {
+	hashes  map[[16]byte]struct{}
+	groups  int
+	records int
 }
 
 func runSplit(args []string) {
@@ -160,7 +168,24 @@ func runSplit(args []string) {
 
 func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, taxdumpDir, taxidMap string, qcCfg splitQCConfig, formatProgress bool) error {
 	splitInput := input
+	var (
+		conflicts  conflictReport
+		labels     map[string]string
+		invalidIDs map[string]struct{}
+	)
 	if qcCfg.Enabled {
+		fastaIDs, err := collectFastaIDs(input)
+		if err != nil {
+			return err
+		}
+		labels, invalidIDs, err = loadProcessLabelMap(taxonkitIn, fastaIDs)
+		if err != nil {
+			return err
+		}
+		conflicts, err = detectSequenceLabelConflicts(input, labels, invalidIDs, qcCfg.GapPolicy)
+		if err != nil {
+			return err
+		}
 		qcOut := filepath.Join(outDir, "qc", qcBaseName(input)+".fasta")
 		util.Logf("split: QC -> %s", qcOut)
 		if err := qc.RunQC(input, qc.Config{
@@ -181,20 +206,24 @@ func splitOne(input, outDir, taxonkitIn string, ranks, classifiers []string, tax
 			return fmt.Errorf("qc failed: %w", err)
 		}
 		splitInput = qcOut
+	} else {
+		fastaIDs, err := collectFastaIDs(splitInput)
+		if err != nil {
+			return err
+		}
+		labels, invalidIDs, err = loadProcessLabelMap(taxonkitIn, fastaIDs)
+		if err != nil {
+			return err
+		}
 	}
 
-	fastaIDs, err := collectFastaIDs(splitInput)
+	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs, conflicts.hashes)
 	if err != nil {
 		return err
 	}
-	labels, invalidIDs, err := loadProcessLabelMap(taxonkitIn, fastaIDs)
-	if err != nil {
-		return err
-	}
-
-	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs)
-	if err != nil {
-		return err
+	if qcCfg.Enabled {
+		stats.ConflictGroups = conflicts.groups
+		stats.ConflictRecords = conflicts.records
 	}
 
 	writeStats, seenTrainIDs, err := writeSplitFastas(splitInput, outDir, plan, labels)
@@ -349,7 +378,56 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 	return labels, invalid, nil
 }
 
-func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}) (splitPlan, splitStats, error) {
+func detectSequenceLabelConflicts(input string, labels map[string]string, invalidIDs map[string]struct{}, gapPolicy string) (conflictReport, error) {
+	in, err := boldio.OpenInput(input)
+	if err != nil {
+		return conflictReport{}, fmt.Errorf("open input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	groups := make(map[[16]byte]barcodeGroup)
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
+		if _, bad := invalidIDs[rec.ID]; bad {
+			return nil
+		}
+		label, ok := labels[rec.ID]
+		if !ok {
+			return nil
+		}
+		clean, _ := qc.CleanSequenceForPolicy(gapPolicy, rec.Seq)
+		if len(clean) == 0 {
+			return nil
+		}
+		hash := md5.Sum(clean)
+		group := groups[hash]
+		if group.count == 0 {
+			group.label = label
+		} else if group.label != label {
+			group.conflict = true
+		}
+		group.count++
+		groups[hash] = group
+		return nil
+	})
+	if err != nil {
+		return conflictReport{}, err
+	}
+
+	report := conflictReport{hashes: make(map[[16]byte]struct{})}
+	for hash, group := range groups {
+		if !group.conflict {
+			continue
+		}
+		report.hashes[hash] = struct{}{}
+		report.groups++
+		report.records += group.count
+	}
+	return report, nil
+}
+
+func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}, preConflicted map[[16]byte]struct{}) (splitPlan, splitStats, error) {
 	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return splitPlan{}, splitStats{}, fmt.Errorf("open input: %w", err)
@@ -392,9 +470,16 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 	speciesUnits := make(map[string][]barcodeUnit)
 	speciesCounts := make(map[string]int)
 
+	conflictRecords := 0
 	for hash, group := range barcodeGroups {
 		if group.conflict {
 			conflicted[hash] = struct{}{}
+			conflictRecords += group.count
+			continue
+		}
+		if _, bad := preConflicted[hash]; bad {
+			conflicted[hash] = struct{}{}
+			conflictRecords += group.count
 			continue
 		}
 		speciesUnits[group.label] = append(speciesUnits[group.label], barcodeUnit{hash: hash, count: group.count})
@@ -442,6 +527,8 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 	if len(conflicted) > 0 {
 		util.Logf("split: %d barcode groups span multiple species labels (moved to %s)", len(conflicted), bucketPretrain)
 	}
+	stats.ConflictGroups = len(conflicted)
+	stats.ConflictRecords = conflictRecords
 
 	return splitPlan{
 		seqBucket:  seqBucket,

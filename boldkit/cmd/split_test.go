@@ -1,0 +1,211 @@
+package cmd
+
+import (
+	"crypto/md5"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/Doomsbay/BoldKit/internal/qc"
+)
+
+func splitTestGammaSequences() []string {
+	seqs := make([]string, 8)
+	for i := 0; i < 8; i++ {
+		b := make([]byte, 8)
+		for j := 0; j < 8; j++ {
+			if (i>>j)&1 == 0 {
+				b[j] = 'A'
+			} else {
+				b[j] = 'C'
+			}
+		}
+		seqs[i] = string(b)
+	}
+	return seqs
+}
+
+func writeSplitFixture(t *testing.T, dir string, gammaFirst bool) (input, taxonkit string) {
+	t.Helper()
+	gammaSeqs := splitTestGammaSequences()
+	var fasta strings.Builder
+	if gammaFirst {
+		for i, seq := range gammaSeqs {
+			fmt.Fprintf(&fasta, ">G%d\n%s\n", i, seq)
+		}
+		fasta.WriteString(">P1\nACGTACGTAC\n>P2\nACGTACGTAC\n>P3\nTTTTGGCCAA\n>P4\nTTTTGGCCAA\n")
+	} else {
+		fasta.WriteString(">P2\nACGTACGTAC\n>P1\nACGTACGTAC\n>P3\nTTTTGGCCAA\n>P4\nTTTTGGCCAA\n")
+		for i, seq := range gammaSeqs {
+			fmt.Fprintf(&fasta, ">G%d\n%s\n", i, seq)
+		}
+	}
+	input = filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(fasta.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var tsv strings.Builder
+	tsv.WriteString("processid\tspecies\n")
+	for i := range gammaSeqs {
+		fmt.Fprintf(&tsv, "G%d\tGamma\n", i)
+	}
+	tsv.WriteString("P1\tAlpha\nP2\tBeta\nP3\tAlpha\nP4\tAlpha\n")
+	taxonkit = filepath.Join(dir, "taxonkit_input.tsv")
+	if err := os.WriteFile(taxonkit, []byte(tsv.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return input, taxonkit
+}
+
+func writeSplitTaxdump(t *testing.T, dir string, pids []string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ranks := []string{"kingdom", "phylum", "class", "order", "family", "genus", "species"}
+	var nodes, names strings.Builder
+	for i, rank := range ranks {
+		id := i + 1
+		parent := id
+		if i > 0 {
+			parent = i
+		}
+		fmt.Fprintf(&nodes, "%d\t|\t%d\t|\t%s\t|\n", id, parent, rank)
+		fmt.Fprintf(&names, "%d\t|\tRank%d\t|\t\t|\tscientific name\t|\n", id, id)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nodes.dmp"), []byte(nodes.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "names.dmp"), []byte(names.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var m strings.Builder
+	for _, pid := range pids {
+		m.WriteString(pid + "\t7\n")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "taxid.map"), []byte(m.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitStats, string) {
+	t.Helper()
+	dir := t.TempDir()
+	input, taxonkit := writeSplitFixture(t, dir, gammaFirst)
+	pids := []string{"P1", "P2", "P3", "P4"}
+	for i := 0; i < 8; i++ {
+		pids = append(pids, fmt.Sprintf("G%d", i))
+	}
+	taxdumpDir := filepath.Join(dir, "taxdump")
+	writeSplitTaxdump(t, taxdumpDir, pids)
+
+	outDir := filepath.Join(dir, "libraries")
+	qcCfg := splitQCConfig{
+		Enabled:    true,
+		GapPolicy:  qc.GapPolicyDrop,
+		DedupeSeqs: dedupe,
+		DedupeIDs:  true,
+	}
+	if err := splitOne(input, outDir, taxonkit, nil, []string{"blast"}, taxdumpDir, "", qcCfg, false); err != nil {
+		t.Fatalf("splitOne: %v", err)
+	}
+
+	reportData, err := os.ReadFile(filepath.Join(outDir, "split_report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report splitReport
+	if err := json.Unmarshal(reportData, &report); err != nil {
+		t.Fatal(err)
+	}
+	return report.Stats, outDir
+}
+
+func TestSplitConflictExcludedFromTrainingUnderQCDedup(t *testing.T) {
+	stats, outDir := runSplitFixture(t, true, true)
+
+	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
+		t.Fatalf("unexpected conflict stats: %+v", stats)
+	}
+	if stats.SeenTrainRecords == 0 {
+		t.Fatalf("expected seen species to supply training records: %+v", stats)
+	}
+
+	pretrain, err := os.ReadFile(filepath.Join(outDir, "pretrain.fasta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(pretrain), ">") != 1 {
+		t.Fatalf("expected exactly one deduped conflicted record in pretrain: %q", pretrain)
+	}
+	if !strings.Contains(string(pretrain), "ACGTACGTAC") {
+		t.Fatalf("conflicted barcode missing from pretrain: %q", pretrain)
+	}
+
+	for _, bucket := range []string{"seen_train", "seen_val", "seen_test", "test_unseen", "val_unseen", "keys_unseen", "other_heldout"} {
+		data, err := os.ReadFile(filepath.Join(outDir, bucket+".fasta"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "ACGTACGTAC") {
+			t.Fatalf("conflicted barcode leaked into %s", bucket)
+		}
+	}
+}
+
+func TestSplitConflictClassificationOrderIndependent(t *testing.T) {
+	forward, _ := runSplitFixture(t, true, true)
+	reversed, _ := runSplitFixture(t, true, false)
+	if forward != reversed {
+		t.Fatalf("split stats depend on record order:\nforward: %+v\nreversed: %+v", forward, reversed)
+	}
+}
+
+func TestSplitConflictExcludedWithDedupeDisabled(t *testing.T) {
+	stats, outDir := runSplitFixture(t, false, true)
+
+	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
+		t.Fatalf("unexpected conflict stats: %+v", stats)
+	}
+	pretrain, err := os.ReadFile(filepath.Join(outDir, "pretrain.fasta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pretrain), ">P1\n") || !strings.Contains(string(pretrain), ">P2\n") {
+		t.Fatalf("expected both conflicted records in pretrain: %q", pretrain)
+	}
+	if strings.Count(string(pretrain), ">") != 2 {
+		t.Fatalf("expected exactly two records in pretrain: %q", pretrain)
+	}
+}
+
+func TestBuildSplitPlanDetectsConflictsWithoutQC(t *testing.T) {
+	dir := t.TempDir()
+	input, taxonkit := writeSplitFixture(t, dir, true)
+
+	fastaIDs, err := collectFastaIDs(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkit, fastaIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil)
+	if err != nil {
+		t.Fatalf("buildSplitPlan: %v", err)
+	}
+
+	hash := md5.Sum([]byte("ACGTACGTAC"))
+	if _, ok := plan.conflicted[hash]; !ok {
+		t.Fatalf("conflicted hash missing from plan: %+v", plan.conflicted)
+	}
+	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
+		t.Fatalf("unexpected conflict stats: %+v", stats)
+	}
+}

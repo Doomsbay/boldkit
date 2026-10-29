@@ -143,7 +143,7 @@ func RunQC(input string, cfg Config) error {
 			}
 		}
 
-		clean, counts := cleanSequence(cfg.GapPolicy, rec.Seq)
+		clean, counts := CleanSequenceForPolicy(cfg.GapPolicy, rec.Seq)
 		if cfg.GapPolicy == GapPolicyDrop && counts.Gapped > 0 {
 			stats.Gapped++
 			updateByteProgress(bar, counter, &lastCount)
@@ -302,7 +302,7 @@ func ValidateGapPolicy(policy string) error {
 	}
 }
 
-func cleanSequence(gapPolicy string, seq []byte) ([]byte, SeqCounts) {
+func CleanSequenceForPolicy(gapPolicy string, seq []byte) ([]byte, SeqCounts) {
 	if gapPolicy == GapPolicyKeep {
 		return CleanSequenceKeep(seq)
 	}
