@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Split planning now detects species conflicts before QC deduplication can hide them: a barcode shared by records with different species labels is excluded from classifier training (moved to `pretrain`) regardless of record order, and `split_report.json` reports `conflict_groups`/`conflict_records`.
+- Split bucket FASTAs and pruned taxdump files are published transactionally (`.tmp` + rename with backup/restore): flush/close/publish failures propagate, existing outputs are preserved on failure, and a success report can no longer describe unwritten outputs.
+
 ## [v0.7.0]
 
 ### Added
