@@ -18,12 +18,11 @@ type rdpTaxonNode struct {
 
 // RDPTaxonomyBuilder manages construction of an RDP-compatible taxonomy tree
 type RDPTaxonomyBuilder struct {
-	nodes       map[string]*rdpTaxonNode // key -> node (key = "name|rank" or disambiguated)
-	nameRank    map[string]string        // "(name_lower|rank)" -> node key
-	taxids      map[string]int           // key -> assigned taxid
-	nextTaxid   int                      // next taxid to assign
-	ranks       []string                 // ordered rank list
-	disambigCnt int                      // count of disambiguated names
+	nodes     map[string]*rdpTaxonNode // key -> node (key = "name|rank" or disambiguated)
+	names     *NameDisambiguator       // shared name resolution and disambiguation
+	taxids    map[string]int           // key -> assigned taxid
+	nextTaxid int                      // next taxid to assign
+	ranks     []string                 // ordered rank list
 }
 
 // rdpRankAliases maps source ranks to RDP rank labels
@@ -45,7 +44,7 @@ func NewRDPTaxonomyBuilder(ranks []string) *RDPTaxonomyBuilder {
 	}
 	return &RDPTaxonomyBuilder{
 		nodes:     make(map[string]*rdpTaxonNode),
-		nameRank:  make(map[string]string),
+		names:     NewNameDisambiguator(),
 		taxids:    make(map[string]int),
 		nextTaxid: 1, // 0 reserved for Root
 		ranks:     rdpRanks,
@@ -88,7 +87,7 @@ func (b *RDPTaxonomyBuilder) AddLineage(names []string) []string {
 			name = parentName + "_unclassified_" + rank
 		}
 
-		key := b.resolveName(name, rank, parentKey, depth)
+		key := b.resolveName(name, rank, parentKey, parentName, depth)
 		keys = append(keys, key)
 		parentKey = key
 		parentName = b.nodes[key].name
@@ -98,66 +97,17 @@ func (b *RDPTaxonomyBuilder) AddLineage(names []string) []string {
 }
 
 // resolveName resolves a name to a unique node key, handling conflicts
-func (b *RDPTaxonomyBuilder) resolveName(name, rank, parentKey string, depth int) string {
-	nameLower := strings.ToLower(name)
-	nameRankKey := nameLower + "|" + rank
-
-	// Check if (name_lower, rank) already exists
-	if existingKey, ok := b.nameRank[nameRankKey]; ok {
-		existing := b.nodes[existingKey]
-		if existing.parentKey == parentKey {
-			// Same parent: merge case variants, use first-seen casing
-			return existingKey
+func (b *RDPTaxonomyBuilder) resolveName(name, rank, parentKey, parentName string, depth int) string {
+	node := b.names.Resolve(name, rank, parentKey, parentName)
+	if _, ok := b.nodes[node.Key]; !ok {
+		b.nodes[node.Key] = &rdpTaxonNode{
+			name:      node.Name,
+			rank:      rank,
+			depth:     depth,
+			parentKey: parentKey,
 		}
-		// Different parent: disambiguate
-		return b.disambiguate(name, rank, parentKey, depth)
 	}
-
-	// New node
-	key := name + "|" + rank
-	b.nameRank[nameRankKey] = key
-	b.nodes[key] = &rdpTaxonNode{
-		name:      name,
-		rank:      rank,
-		depth:     depth,
-		parentKey: parentKey,
-	}
-	return key
-}
-
-// disambiguate handles same name under different parent by prefixing with parent name
-func (b *RDPTaxonomyBuilder) disambiguate(name, rank, parentKey string, depth int) string {
-	if depth > 50 {
-		key := name + "|" + rank
-		return key
-	}
-	parent := b.nodes[parentKey]
-	disambigName := parent.name + "_" + name
-
-	// Check if disambiguated name also conflicts
-	nameLower := strings.ToLower(disambigName)
-	nameRankKey := nameLower + "|" + rank
-
-	if existingKey, ok := b.nameRank[nameRankKey]; ok {
-		existing := b.nodes[existingKey]
-		if existing.parentKey == parentKey {
-			return existingKey
-		}
-		// Still conflicts, recurse with grandparent prefix
-		return b.disambiguate(disambigName, rank, parentKey, depth+1)
-	}
-
-	// Create disambiguated node
-	key := disambigName + "|" + rank
-	b.nameRank[nameRankKey] = key
-	b.nodes[key] = &rdpTaxonNode{
-		name:      disambigName,
-		rank:      rank,
-		depth:     depth,
-		parentKey: parentKey,
-	}
-	b.disambigCnt++
-	return key
+	return node.Key
 }
 
 // assignTaxids assigns integer taxids to all nodes in breadth-first order
@@ -242,5 +192,5 @@ func (b *RDPTaxonomyBuilder) GetLineageString(keys []string) string {
 
 // DisambiguatedCount returns the count of disambiguated names
 func (b *RDPTaxonomyBuilder) DisambiguatedCount() int {
-	return b.disambigCnt
+	return b.names.DisambiguatedCount()
 }

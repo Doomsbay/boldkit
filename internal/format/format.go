@@ -76,6 +76,7 @@ type formatWriters struct {
 	idtaxaLineage writerHandle
 	protaxFasta   writerHandle
 	protaxMap     writerHandle
+	protaxCSV     writerHandle
 }
 
 func FormatFasta(cfg FormatConfig) error {
@@ -221,6 +222,12 @@ func FormatFasta(cfg FormatConfig) error {
 		}
 	}
 
+	if writers.protaxCSV.w != nil {
+		if err := formatProtaxCSV(cfg, taxidMap, dump, writers); err != nil {
+			return fmt.Errorf("protax csv: %w", err)
+		}
+	}
+
 	if err := commitFormatWriters(writers); err != nil {
 		return fmt.Errorf("finalize outputs: %w", err)
 	}
@@ -342,6 +349,81 @@ func formatFastaRdp(cfg FormatConfig, taxidMap map[string]int, dump *boldtaxonom
 	return nil
 }
 
+var protaxCSVRanks = []string{"phylum", "class", "order", "family", "genus", "species"}
+
+func formatProtaxCSV(cfg FormatConfig, taxidMap map[string]int, dump *boldtaxonomy.TaxDump, writers *formatWriters) error {
+	if _, err := writers.protaxCSV.w.WriteString(strings.Join(protaxCSVRanks, ",") + ",dna_barcode\n"); err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
+	dis := boldtaxonomy.NewNameDisambiguator()
+	global := make(map[string]string)
+
+	in, err := boldio.OpenInput(cfg.Input)
+	if err != nil {
+		return fmt.Errorf("open input for protax csv: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
+		if rec.ID == "" {
+			return nil
+		}
+		taxid, ok := taxidMap[rec.ID]
+		if !ok {
+			return nil
+		}
+		lineage := dump.Lineage(taxid)
+		if !boldtaxonomy.HasAllRanks(lineage, cfg.RequireRanks) {
+			return nil
+		}
+		if len(BuildLineage(lineage, cfg.RequireRanks)) == 0 {
+			return nil
+		}
+
+		row := make([]string, len(protaxCSVRanks)+1)
+		parent := "Root"
+		for i, rank := range protaxCSVRanks {
+			raw := SanitizeTaxon(lineage[rank])
+			if raw == "" {
+				row[i] = ""
+				continue
+			}
+			name := dis.Resolve(raw, rank, parent, parent).Name
+			name = claimProtaxName(global, name, rank, parent, dis)
+			row[i] = name
+			parent = name
+		}
+		row[len(row)-1] = string(rec.Seq)
+		if _, err := writers.protaxCSV.w.WriteString(strings.Join(row, ",") + "\n"); err != nil {
+			return fmt.Errorf("write row: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if cnt := dis.DisambiguatedCount(); cnt > 0 {
+		util.Logf("protax: disambiguated %d taxonomy names due to parent conflicts", cnt)
+	}
+	return nil
+}
+
+func claimProtaxName(global map[string]string, name, rank, parent string, dis *boldtaxonomy.NameDisambiguator) string {
+	for attempt := 0; ; attempt++ {
+		owner, ok := global[name]
+		if !ok || owner == rank {
+			global[name] = rank
+			return name
+		}
+		if attempt >= 2 {
+			return name
+		}
+		name = dis.Resolve(name+"_"+rank, rank, parent, parent).Name
+	}
+}
+
 func openFormatWriters(outDir string, classifiers []string) (*formatWriters, error) {
 	w := &formatWriters{}
 	opened := false
@@ -429,6 +511,11 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 			return nil, err
 		}
 		w.protaxMap = tw
+		cw, err := openFasta("protax_refs.csv")
+		if err != nil {
+			return nil, err
+		}
+		w.protaxCSV = cw
 	}
 	opened = true
 	return w, nil
@@ -449,6 +536,7 @@ func commitFormatWriters(w *formatWriters) error {
 		{"idtaxa_lineage.tsv", w.idtaxaLineage},
 		{"protax_seqs.fasta", w.protaxFasta},
 		{"protax_seqid2tax.tsv", w.protaxMap},
+		{"protax_refs.csv", w.protaxCSV},
 	}
 	for _, h := range handles {
 		if h.h.w == nil {
@@ -467,7 +555,7 @@ func commitFormatWriters(w *formatWriters) error {
 }
 
 func discardFormatWriters(w *formatWriters) {
-	for _, h := range []writerHandle{w.blastFasta, w.blastMap, w.krakenFasta, w.sintaxFasta, w.rdpTrainFasta, w.rdpTaxonomy, w.idtaxaFasta, w.idtaxaLineage, w.protaxFasta, w.protaxMap} {
+	for _, h := range []writerHandle{w.blastFasta, w.blastMap, w.krakenFasta, w.sintaxFasta, w.rdpTrainFasta, w.rdpTaxonomy, w.idtaxaFasta, w.idtaxaLineage, w.protaxFasta, w.protaxMap, w.protaxCSV} {
 		if h.f == nil {
 			continue
 		}
