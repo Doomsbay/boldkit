@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Doomsbay/BoldKit/internal/qc"
+	boldtaxonomy "github.com/Doomsbay/BoldKit/internal/taxonomy"
 )
 
 func splitTestGammaSequences() []string {
@@ -180,6 +181,168 @@ func TestSplitConflictExcludedWithDedupeDisabled(t *testing.T) {
 	}
 	if strings.Count(string(pretrain), ">") != 2 {
 		t.Fatalf("expected exactly two records in pretrain: %q", pretrain)
+	}
+}
+
+func TestSplitFlushFailurePropagatesAndPreservesOutputs(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("/dev/full not available")
+	}
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nACGTACGTAC\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "libraries")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(outDir, "seen_train.fasta")
+	if err := os.WriteFile(existing, []byte(">OLD\nACGT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/full", filepath.Join(outDir, "seen_val.fasta.tmp")); err != nil {
+		t.Fatal(err)
+	}
+
+	hash := md5.Sum([]byte("ACGTACGTAC"))
+	plan := splitPlan{seqBucket: map[[16]byte]string{hash: bucketSeenVal}}
+	_, _, err := writeSplitFastas(input, outDir, plan, map[string]string{"P1": "Alpha"})
+	if err == nil || !strings.Contains(err.Error(), "seen_val.fasta") {
+		t.Fatalf("expected flush failure for seen_val, got %v", err)
+	}
+
+	got, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != ">OLD\nACGT\n" {
+		t.Fatalf("existing output not preserved: %q", got)
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != "seen_train.fasta" {
+		t.Fatalf("expected only the preserved output after failure, got %v", names)
+	}
+}
+
+func TestSplitSetupFailureClosesHandles(t *testing.T) {
+	if _, err := os.ReadDir("/proc/self/fd"); err != nil {
+		t.Skip("file descriptor inspection unavailable")
+	}
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nACGTACGTAC\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "libraries")
+	if err := os.MkdirAll(filepath.Join(outDir, "seen_val.fasta.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	hash := md5.Sum([]byte("ACGTACGTAC"))
+	plan := splitPlan{seqBucket: map[[16]byte]string{hash: bucketSeenVal}}
+	_, _, err := writeSplitFastas(input, outDir, plan, map[string]string{"P1": "Alpha"})
+	if err == nil {
+		t.Fatal("expected setup error for directory at tmp path")
+	}
+
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if err == nil && strings.HasPrefix(target, outDir+string(os.PathSeparator)) && strings.HasSuffix(target, ".tmp") {
+			t.Fatalf("split writer left open after setup failure: %s", target)
+		}
+	}
+}
+
+func TestSplitPublishesAtomicallyWithoutLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nACGT\n>P2\nACGT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "libraries")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(outDir, "pretrain.fasta")
+	if err := os.WriteFile(existing, []byte(">OLD\nACGT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hash := md5.Sum([]byte("ACGT"))
+	plan := splitPlan{seqBucket: map[[16]byte]string{hash: bucketPretrain}}
+	counts, _, err := writeSplitFastas(input, outDir, plan, map[string]string{"P1": "Alpha", "P2": "Alpha"})
+	if err != nil {
+		t.Fatalf("writeSplitFastas: %v", err)
+	}
+	if counts[bucketPretrain] != 2 {
+		t.Fatalf("unexpected counts: %+v", counts)
+	}
+
+	got, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := ">P1\nACGT\n>P2\nACGT\n"; string(got) != want {
+		t.Fatalf("pretrain not republished: got %q, want %q", got, want)
+	}
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") || strings.HasSuffix(e.Name(), ".bak") {
+			t.Fatalf("leftover artifact after successful publish: %s", e.Name())
+		}
+	}
+}
+
+func TestPrunedTaxdumpFlushFailurePropagates(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("/dev/full not available")
+	}
+	dir := t.TempDir()
+	fixtureDir := filepath.Join(dir, "taxdump")
+	writeSplitTaxdump(t, fixtureDir, []string{"P1"})
+	dump, err := boldtaxonomy.LoadTaxDump(filepath.Join(fixtureDir, "nodes.dmp"), filepath.Join(fixtureDir, "names.dmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+		call func(path string) error
+	}{
+		{"nodes", "nodes.dmp", func(path string) error { return writePrunedNodes(path, dump, map[int]struct{}{7: {}}) }},
+		{"names", "names.dmp", func(path string) error { return writePrunedNames(path, dump, map[int]struct{}{7: {}}) }},
+		{"taxidmap", "taxid.map", func(path string) error { return writePrunedTaxidMap(path, map[string]int{"P1": 7}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			final := filepath.Join(outDir, tc.path)
+			if err := os.Symlink("/dev/full", final+".tmp"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.call(final); err == nil {
+				t.Fatal("expected flush failure to propagate")
+			}
+			if _, err := os.Stat(final); !os.IsNotExist(err) {
+				t.Fatalf("failed writer published %s", final)
+			}
+		})
 	}
 }
 

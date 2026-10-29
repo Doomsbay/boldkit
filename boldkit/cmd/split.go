@@ -574,28 +574,43 @@ func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]st
 		bucketHeldout:    filepath.Join(outDir, "other_heldout.fasta"),
 		bucketPretrain:   filepath.Join(outDir, "pretrain.fasta"),
 	}
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return nil, nil, fmt.Errorf("output %s is a directory", path)
+		}
+	}
 
 	type splitWriter struct {
-		file *os.File
-		buf  *bufio.Writer
+		file  *os.File
+		buf   *bufio.Writer
+		tmp   string
+		final string
 	}
-	writers := make(map[string]splitWriter, len(paths))
-	for key, path := range paths {
-		f, err := os.Create(path)
-		if err != nil {
-			return nil, nil, fmt.Errorf("create %s: %w", path, err)
-		}
-		writers[key] = splitWriter{
-			file: f,
-			buf:  bufio.NewWriterSize(f, writerBufferSize),
-		}
-	}
-	defer func() {
+	writers := make(map[string]*splitWriter, len(paths))
+	cleanup := func() {
 		for _, w := range writers {
-			_ = w.buf.Flush()
-			_ = w.file.Close()
+			if w.file != nil {
+				_ = w.file.Close()
+			}
+			if w.tmp != "" {
+				_ = os.Remove(w.tmp)
+			}
+		}
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cleanup()
 		}
 	}()
+	for key, path := range paths {
+		tmp := path + ".tmp"
+		f, err := os.Create(tmp)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create %s: %w", tmp, err)
+		}
+		writers[key] = &splitWriter{file: f, buf: bufio.NewWriterSize(f, writerBufferSize), tmp: tmp, final: path}
+	}
 
 	in, err := boldio.OpenInput(input)
 	if err != nil {
@@ -637,6 +652,45 @@ func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]st
 		return nil, nil, err
 	}
 
+	for _, w := range writers {
+		if err := w.buf.Flush(); err != nil {
+			return nil, nil, fmt.Errorf("flush %s: %w", w.final, err)
+		}
+		if err := w.file.Close(); err != nil {
+			return nil, nil, fmt.Errorf("close %s: %w", w.final, err)
+		}
+		w.file = nil
+	}
+
+	backups := make(map[string]string, len(writers))
+	for _, w := range writers {
+		if _, err := os.Stat(w.final); err == nil {
+			bak := w.final + ".bak"
+			if err := os.Rename(w.final, bak); err != nil {
+				return nil, nil, fmt.Errorf("backup %s: %w", w.final, err)
+			}
+			backups[w.final] = bak
+		}
+	}
+	published := make([]string, 0, len(writers))
+	for _, w := range writers {
+		if err := os.Rename(w.tmp, w.final); err != nil {
+			for _, path := range published {
+				_ = os.Remove(path)
+			}
+			for final, bak := range backups {
+				_ = os.Rename(bak, final)
+			}
+			return nil, nil, fmt.Errorf("publish %s: %w", w.final, err)
+		}
+		published = append(published, w.final)
+		w.tmp = ""
+	}
+	for _, bak := range backups {
+		_ = os.Remove(bak)
+	}
+	committed = true
+
 	return counts, seenTrainIDs, nil
 }
 
@@ -676,13 +730,14 @@ func writeSplitReport(path string, report splitReport) error {
 	if err != nil {
 		return fmt.Errorf("create split report: %w", err)
 	}
-	defer func() {
-		_ = f.Close()
-	}()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(report); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write split report: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close split report: %w", err)
 	}
 	return nil
 }
@@ -751,58 +806,64 @@ func pruneTaxdumpForSeenTrain(seenTrainIDs map[string]struct{}, taxdumpDir, taxi
 	return prunedDir, len(keep), nil
 }
 
-func writePrunedNodes(path string, dump *boldtaxonomy.TaxDump, keep map[int]struct{}) error {
-	ids := sortedIntSet(keep)
-	f, err := os.Create(path)
+func writePrunedFile(path string, write func(*bufio.Writer) error) error {
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
 	if err != nil {
-		return fmt.Errorf("create nodes.dmp: %w", err)
+		return fmt.Errorf("create %s: %w", tmp, err)
 	}
-	defer func() {
-		_ = f.Close()
-	}()
-
 	w := bufio.NewWriterSize(f, writerBufferSize)
-	defer func() {
-		_ = w.Flush()
-	}()
-
-	for _, id := range ids {
-		node, ok := dump.Node(id)
-		if !ok {
-			continue
-		}
-		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + strconv.Itoa(node.Parent) + "\t|\t" + node.Rank + "\t|\n"); err != nil {
-			return fmt.Errorf("write nodes.dmp: %w", err)
-		}
+	if err := write(w); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := w.Flush(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("flush %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("publish %s: %w", path, err)
 	}
 	return nil
 }
 
+func writePrunedNodes(path string, dump *boldtaxonomy.TaxDump, keep map[int]struct{}) error {
+	ids := sortedIntSet(keep)
+	return writePrunedFile(path, func(w *bufio.Writer) error {
+		for _, id := range ids {
+			node, ok := dump.Node(id)
+			if !ok {
+				continue
+			}
+			if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + strconv.Itoa(node.Parent) + "\t|\t" + node.Rank + "\t|\n"); err != nil {
+				return fmt.Errorf("write nodes.dmp: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
 func writePrunedNames(path string, dump *boldtaxonomy.TaxDump, keep map[int]struct{}) error {
 	ids := sortedIntSet(keep)
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("create names.dmp: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	w := bufio.NewWriterSize(f, writerBufferSize)
-	defer func() {
-		_ = w.Flush()
-	}()
-
-	for _, id := range ids {
-		node, ok := dump.Node(id)
-		if !ok || node.Name == "" {
-			continue
+	return writePrunedFile(path, func(w *bufio.Writer) error {
+		for _, id := range ids {
+			node, ok := dump.Node(id)
+			if !ok || node.Name == "" {
+				continue
+			}
+			if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + node.Name + "\t|\t\t|\tscientific name\t|\n"); err != nil {
+				return fmt.Errorf("write names.dmp: %w", err)
+			}
 		}
-		if _, err := w.WriteString(strconv.Itoa(id) + "\t|\t" + node.Name + "\t|\t\t|\tscientific name\t|\n"); err != nil {
-			return fmt.Errorf("write names.dmp: %w", err)
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func writePrunedTaxidMap(path string, pidTaxid map[string]int) error {
@@ -811,26 +872,14 @@ func writePrunedTaxidMap(path string, pidTaxid map[string]int) error {
 		pids = append(pids, pid)
 	}
 	sort.Strings(pids)
-
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("create taxid.map: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	w := bufio.NewWriterSize(f, writerBufferSize)
-	defer func() {
-		_ = w.Flush()
-	}()
-
-	for _, pid := range pids {
-		if _, err := w.WriteString(pid + "\t" + strconv.Itoa(pidTaxid[pid]) + "\n"); err != nil {
-			return fmt.Errorf("write taxid.map: %w", err)
+	return writePrunedFile(path, func(w *bufio.Writer) error {
+		for _, pid := range pids {
+			if _, err := w.WriteString(pid + "\t" + strconv.Itoa(pidTaxid[pid]) + "\n"); err != nil {
+				return fmt.Errorf("write taxid.map: %w", err)
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func sortedIntSet(values map[int]struct{}) []int {
