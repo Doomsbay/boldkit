@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.7.0]
 
 ### Added
 - `-gap-policy keep`: frame-preserving gap handling for BOLD's aligned sequences — terminal gaps become `N`, internal gaps are preserved verbatim, terminal `N` runs are exempt from `-max-n`/`-max-ambig` and reported as `terminal_n`/`padded_records` in the QC report. Available on `qc`, `classify`, and `split`.
