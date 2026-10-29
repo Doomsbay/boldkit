@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- `-gap-policy keep`: frame-preserving gap handling for BOLD's aligned sequences — terminal gaps become `N`, internal gaps are preserved verbatim, terminal `N` runs are exempt from `-max-n`/`-max-ambig` and reported as `terminal_n`/`padded_records` in the QC report. Available on `qc`, `classify`, and `split`.
+- `format -classifier protax` now emits `protax_refs.csv` per library in the PROTAX-SSL schema (`phylum,class,order,family,genus,species,dna_barcode`) with tree-wide homonym-disambiguated, comma-free taxon names. Existing protax FASTA/TSV outputs are unchanged. See the wiki's PROTAX-SSL page for the training workflow.
+
+### Fixed
+- Unknown classifier names (including mixed valid/invalid selections) are rejected before any output file is created; the unimplemented `dnasketch` option was removed from help.
+
 ## [v0.6.0]
 
 ### Added
