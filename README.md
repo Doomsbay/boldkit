@@ -116,6 +116,7 @@ Run the pipeline on any snapshot (e.g., `BOLD_Public.2023-xx`, `BOLD_Public.2024
 ## Data policy and releases
 - Large generated data are not committed to Git; they are published under GitHub Releases as `bold-taxdump.<snapshot>.tar.gz`, `marker_fastas.<snapshot>.tar.gz`, `taxonkit_input.<snapshot>.tsv.gz`, `manifest.json`, and `SHA256SUMS.txt`.
 - Each release should record the BOLD snapshot ID and the pipeline commit hash for reproducibility.
+- Data releases are derived from BOLD public data packages and licensed CC BY-SA 4.0; see each release's notes for citation.
 
 ## Data citation
 Users are strongly encouraged to cite data retrieved from BOLD and the tools
