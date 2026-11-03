@@ -72,7 +72,7 @@ func runClassify(args []string) {
 }
 
 func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDir, taxidMap string, qcMin, qcMax, qcMaxN, qcMaxAmbig, qcMaxInvalid int, qcGapPolicy string, qcDedupe, qcDedupeIDs, qcProgress, formatProgress, qcOnly, compress, force bool) error {
-	base := qcBaseName(input)
+	base := boldio.QCBaseName(input)
 	qcOut := filepath.Join(outDir, "qc", base+".fasta")
 	qcCfg := qc.Config{
 		MinLen:       qcMin,
@@ -127,17 +127,6 @@ func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDi
 		}
 	}
 	return nil
-}
-
-func qcBaseName(path string) string {
-	base := filepath.Base(path)
-	base = strings.TrimSuffix(base, ".gz")
-	ext := filepath.Ext(base)
-	base = strings.TrimSuffix(base, ext)
-	if base == "" {
-		return "qc_output"
-	}
-	return base
 }
 
 func resolveMarkerInput(markerDir, marker string) (string, error) {

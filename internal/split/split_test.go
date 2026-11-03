@@ -1,4 +1,4 @@
-package cmd
+package split
 
 import (
 	"crypto/md5"
@@ -105,14 +105,20 @@ func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitStats, st
 	writeSplitTaxdump(t, taxdumpDir, pids)
 
 	outDir := filepath.Join(dir, "libraries")
-	qcCfg := splitQCConfig{
-		Enabled:    true,
-		GapPolicy:  qc.GapPolicyDrop,
-		DedupeSeqs: dedupe,
-		DedupeIDs:  true,
-	}
-	if err := splitOne(input, outDir, taxonkit, nil, []string{"blast"}, taxdumpDir, "", qcCfg, false); err != nil {
-		t.Fatalf("splitOne: %v", err)
+	if err := SplitOne(Config{
+		Input:         input,
+		OutDir:        outDir,
+		TaxonkitInput: taxonkit,
+		Classifiers:   []string{"blast"},
+		TaxdumpDir:    taxdumpDir,
+		RunQC:         true,
+		QC: qc.Config{
+			GapPolicy:  qc.GapPolicyDrop,
+			DedupeSeqs: dedupe,
+			DedupeIDs:  true,
+		},
+	}); err != nil {
+		t.Fatalf("SplitOne: %v", err)
 	}
 
 	reportData, err := os.ReadFile(filepath.Join(outDir, "split_report.json"))
@@ -359,7 +365,7 @@ func TestBuildSplitPlanDetectsConflictsWithoutQC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil)
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy())
 	if err != nil {
 		t.Fatalf("buildSplitPlan: %v", err)
 	}
@@ -370,5 +376,58 @@ func TestBuildSplitPlanDetectsConflictsWithoutQC(t *testing.T) {
 	}
 	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
 		t.Fatalf("unexpected conflict stats: %+v", stats)
+	}
+}
+
+func TestBuildSplitPlanDefaultStrategyGoldenBuckets(t *testing.T) {
+	dir := t.TempDir()
+	input, taxonkit := writeSplitFixture(t, dir, true)
+
+	fastaIDs, err := collectFastaIDs(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkit, fastaIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy())
+	if err != nil {
+		t.Fatalf("buildSplitPlan: %v", err)
+	}
+	if stats.TotalClasses != 2 || stats.SeenClasses != 1 || stats.UnseenClasses != 1 || stats.HeldoutClasses != 0 {
+		t.Fatalf("unexpected class stats: %+v", stats)
+	}
+
+	want := map[string]string{
+		"G0": bucketSeenTrain,
+		"G1": bucketSeenTrain,
+		"G2": bucketSeenTest,
+		"G3": bucketSeenTrain,
+		"G4": bucketSeenTrain,
+		"G5": bucketSeenTrain,
+		"G6": bucketSeenTest,
+		"G7": bucketSeenVal,
+		"P3": bucketUnseenTest,
+		"P4": bucketUnseenTest,
+		"P1": bucketPretrain,
+		"P2": bucketPretrain,
+	}
+	seqs := map[string]string{"P1": "ACGTACGTAC", "P2": "ACGTACGTAC", "P3": "TTTTGGCCAA", "P4": "TTTTGGCCAA"}
+	for i, seq := range splitTestGammaSequences() {
+		seqs[fmt.Sprintf("G%d", i)] = seq
+	}
+	for id, wantBucket := range want {
+		hash := md5.Sum([]byte(seqs[id]))
+		got := bucketPretrain
+		if _, conflict := plan.conflicted[hash]; !conflict {
+			if mapped, ok := plan.seqBucket[hash]; ok {
+				got = mapped
+			}
+		}
+		if got != wantBucket {
+			t.Errorf("%s: got bucket %s, want %s", id, got, wantBucket)
+		}
 	}
 }

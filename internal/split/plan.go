@@ -1,0 +1,283 @@
+package split
+
+import (
+	"crypto/md5"
+	"fmt"
+	"math"
+	"sort"
+
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
+	"github.com/Doomsbay/BoldKit/internal/qc"
+	"github.com/Doomsbay/BoldKit/internal/util"
+)
+
+type SplitStrategy struct {
+	MinSeenRecords        int
+	MinSeenBarcodes       int
+	MaxTestTargetPerClass int
+	SeenTestTarget        float64
+	SeenValTarget         float64
+	UnseenValTarget       float64
+	HeldoutFrac           float64
+}
+
+func DefaultStrategy() SplitStrategy {
+	return SplitStrategy{
+		MinSeenRecords:        8,
+		MinSeenBarcodes:       2,
+		MaxTestTargetPerClass: 25,
+		SeenTestTarget:        0.20,
+		SeenValTarget:         0.05,
+		UnseenValTarget:       0.20,
+		HeldoutFrac:           0.50,
+	}
+}
+
+type barcodeUnit struct {
+	hash  [16]byte
+	count int
+}
+
+type barcodeGroup struct {
+	label    string
+	count    int
+	conflict bool
+}
+
+type splitPlan struct {
+	seqBucket  map[[16]byte]string
+	conflicted map[[16]byte]struct{}
+	invalidIDs map[string]struct{}
+}
+
+type splitTarget struct {
+	bucket string
+	target int
+}
+
+type conflictReport struct {
+	hashes  map[[16]byte]struct{}
+	groups  int
+	records int
+}
+
+func permill(frac float64) int {
+	return int(math.Round(frac * 1000))
+}
+
+func heldoutHashThreshold(frac float64) int {
+	return ceilDiv(permill(frac)*256, 1000)
+}
+
+func detectSequenceLabelConflicts(input string, labels map[string]string, invalidIDs map[string]struct{}, gapPolicy string) (conflictReport, error) {
+	in, err := boldio.OpenInput(input)
+	if err != nil {
+		return conflictReport{}, fmt.Errorf("open input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	groups := make(map[[16]byte]barcodeGroup)
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
+		if _, bad := invalidIDs[rec.ID]; bad {
+			return nil
+		}
+		label, ok := labels[rec.ID]
+		if !ok {
+			return nil
+		}
+		clean, _ := qc.CleanSequenceForPolicy(gapPolicy, rec.Seq)
+		if len(clean) == 0 {
+			return nil
+		}
+		hash := md5.Sum(clean)
+		group := groups[hash]
+		if group.count == 0 {
+			group.label = label
+		} else if group.label != label {
+			group.conflict = true
+		}
+		group.count++
+		groups[hash] = group
+		return nil
+	})
+	if err != nil {
+		return conflictReport{}, err
+	}
+
+	report := conflictReport{hashes: make(map[[16]byte]struct{})}
+	for hash, group := range groups {
+		if !group.conflict {
+			continue
+		}
+		report.hashes[hash] = struct{}{}
+		report.groups++
+		report.records += group.count
+	}
+	return report, nil
+}
+
+func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}, preConflicted map[[16]byte]struct{}, strategy SplitStrategy) (splitPlan, splitStats, error) {
+	in, err := boldio.OpenInput(input)
+	if err != nil {
+		return splitPlan{}, splitStats{}, fmt.Errorf("open input: %w", err)
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	barcodeGroups := make(map[[16]byte]barcodeGroup, 1<<20)
+	stats := splitStats{}
+
+	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
+		stats.TotalRecords++
+		if _, bad := invalidIDs[rec.ID]; bad {
+			return nil
+		}
+		label, ok := labels[rec.ID]
+		if !ok {
+			invalidIDs[rec.ID] = struct{}{}
+			return nil
+		}
+
+		hash := md5.Sum(rec.Seq)
+		group := barcodeGroups[hash]
+		if group.count == 0 {
+			group.label = label
+		} else if group.label != label {
+			group.conflict = true
+		}
+		group.count++
+		barcodeGroups[hash] = group
+		return nil
+	})
+	if err != nil {
+		return splitPlan{}, splitStats{}, err
+	}
+
+	seqBucket := make(map[[16]byte]string, len(barcodeGroups))
+	conflicted := make(map[[16]byte]struct{})
+	speciesUnits := make(map[string][]barcodeUnit)
+	speciesCounts := make(map[string]int)
+
+	conflictRecords := 0
+	for hash, group := range barcodeGroups {
+		if group.conflict {
+			conflicted[hash] = struct{}{}
+			conflictRecords += group.count
+			continue
+		}
+		if _, bad := preConflicted[hash]; bad {
+			conflicted[hash] = struct{}{}
+			conflictRecords += group.count
+			continue
+		}
+		speciesUnits[group.label] = append(speciesUnits[group.label], barcodeUnit{hash: hash, count: group.count})
+		speciesCounts[group.label] += group.count
+	}
+
+	heldoutThreshold := heldoutHashThreshold(strategy.HeldoutFrac)
+	stats.TotalClasses = len(speciesUnits)
+	for label, units := range speciesUnits {
+		total := speciesCounts[label]
+		uniqueBarcodes := len(units)
+		sort.Slice(units, func(i, j int) bool {
+			return lessHash(units[i].hash, units[j].hash)
+		})
+
+		if total >= strategy.MinSeenRecords && uniqueBarcodes >= strategy.MinSeenBarcodes {
+			stats.SeenClasses++
+			testTarget := minInt(strategy.MaxTestTargetPerClass, ceilDiv(permill(strategy.SeenTestTarget)*total, 1000))
+			valTarget := ceilDiv(permill(strategy.SeenValTarget)*(total-testTarget), 1000)
+			assignUnits(seqBucket, units, []splitTarget{
+				{bucket: bucketSeenTest, target: testTarget},
+				{bucket: bucketSeenVal, target: valTarget},
+				{bucket: bucketSeenTrain, target: -1},
+			})
+			continue
+		}
+
+		if int(classHashByte(label)) < heldoutThreshold {
+			stats.UnseenClasses++
+			testTarget := minInt(strategy.MaxTestTargetPerClass, ceilDiv(permill(strategy.SeenTestTarget)*total, 1000))
+			valTarget := ceilDiv(permill(strategy.UnseenValTarget)*(total-testTarget), 1000)
+			assignUnits(seqBucket, units, []splitTarget{
+				{bucket: bucketUnseenTest, target: testTarget},
+				{bucket: bucketUnseenVal, target: valTarget},
+				{bucket: bucketUnseenKeys, target: -1},
+			})
+			continue
+		}
+
+		stats.HeldoutClasses++
+		for _, unit := range units {
+			seqBucket[unit.hash] = bucketHeldout
+		}
+	}
+
+	if len(conflicted) > 0 {
+		util.Logf("split: %d barcode groups span multiple species labels (moved to %s)", len(conflicted), bucketPretrain)
+	}
+	stats.ConflictGroups = len(conflicted)
+	stats.ConflictRecords = conflictRecords
+
+	return splitPlan{
+		seqBucket:  seqBucket,
+		conflicted: conflicted,
+		invalidIDs: invalidIDs,
+	}, stats, nil
+}
+
+func assignUnits(seqBucket map[[16]byte]string, units []barcodeUnit, targets []splitTarget) {
+	idx := 0
+	for _, t := range targets {
+		if idx >= len(units) {
+			return
+		}
+		if t.target < 0 {
+			for idx < len(units) {
+				seqBucket[units[idx].hash] = t.bucket
+				idx++
+			}
+			return
+		}
+		acc := 0
+		for idx < len(units) && acc < t.target {
+			seqBucket[units[idx].hash] = t.bucket
+			acc += units[idx].count
+			idx++
+		}
+	}
+}
+
+func lessHash(a, b [16]byte) bool {
+	for i := 0; i < len(a); i++ {
+		if a[i] < b[i] {
+			return true
+		}
+		if a[i] > b[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func classHashByte(label string) byte {
+	sum := md5.Sum([]byte(label))
+	return sum[0]
+}
+
+func ceilDiv(a, b int) int {
+	if b <= 0 || a <= 0 {
+		return 0
+	}
+	return (a + b - 1) / b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

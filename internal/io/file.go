@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func FileExists(path string) bool {
@@ -117,4 +118,15 @@ func CopyDir(src, dest string) error {
 func PathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func QCBaseName(path string) string {
+	base := filepath.Base(path)
+	base = strings.TrimSuffix(base, ".gz")
+	ext := filepath.Ext(base)
+	base = strings.TrimSuffix(base, ext)
+	if base == "" {
+		return "qc_output"
+	}
+	return base
 }

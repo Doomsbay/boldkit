@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-const writerBufferSize = 1 << 20
-
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
