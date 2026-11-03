@@ -1,4 +1,4 @@
-package cmd
+package pipeline
 
 import (
 	"archive/tar"
@@ -33,7 +33,7 @@ func TestPackageReleaseRejectsExistingOutputsBeforeMovingInputs(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := packageSourceContents(t, cfg)
-			err := packageRelease(cfg)
+			err := PackageRelease(cfg)
 			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "force") {
 				t.Fatalf("expected existing-output error identifying %s, got %v", path, err)
 			}
@@ -79,7 +79,7 @@ func TestPackageReleasePublishesCurrentInputs(t *testing.T) {
 					}
 				}
 			}
-			if err := packageRelease(cfg); err != nil {
+			if err := PackageRelease(cfg); err != nil {
 				t.Fatal(err)
 			}
 			assertArchiveMember(t, packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot), "markers/COI-5P.fasta", ">P1\nACGT\n")
@@ -111,7 +111,7 @@ func TestPackageReleaseRejectsNonRegularOutputsWithForce(t *testing.T) {
 				t.Skipf("symlinks unavailable: %v", err)
 			}
 			before := packageSourceContents(t, cfg)
-			if err := packageRelease(cfg); err == nil || !strings.Contains(err.Error(), path) {
+			if err := PackageRelease(cfg); err == nil || !strings.Contains(err.Error(), path) {
 				t.Fatalf("expected output conflict error, got %v", err)
 			}
 			assertPackageSources(t, before)
@@ -130,16 +130,16 @@ func TestPackageReleaseKeepsGzipTaxonomyAlreadyAtDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.TaxonkitOut = dest
-	if err := packageRelease(cfg); err != nil {
+	if err := PackageRelease(cfg); err != nil {
 		t.Fatal(err)
 	}
 	assertPackageGzip(t, dest, "species\tprocessid\nCanis lupus\tP1\n")
 }
 
-func newPackageFixture(t *testing.T, compressed bool) packageConfig {
+func newPackageFixture(t *testing.T, compressed bool) ReleaseConfig {
 	t.Helper()
 	dir := t.TempDir()
-	cfg := packageConfig{
+	cfg := ReleaseConfig{
 		TaxdumpDir:  filepath.Join(dir, "taxdump"),
 		MarkerDir:   filepath.Join(dir, "markers"),
 		TaxonkitOut: filepath.Join(dir, "taxonomy.tsv"),
@@ -176,7 +176,7 @@ func newPackageFixture(t *testing.T, compressed bool) packageConfig {
 	return cfg
 }
 
-func packageSourceContents(t *testing.T, cfg packageConfig) map[string]string {
+func packageSourceContents(t *testing.T, cfg ReleaseConfig) map[string]string {
 	t.Helper()
 	contents := make(map[string]string)
 	for _, path := range []string{cfg.TaxonkitOut, filepath.Join(cfg.TaxdumpDir, "nodes.dmp"), filepath.Join(cfg.TaxdumpDir, "names.dmp"), filepath.Join(cfg.TaxdumpDir, "taxid.map"), filepath.Join(cfg.MarkerDir, "COI-5P.fasta")} {

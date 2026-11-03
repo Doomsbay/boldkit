@@ -1,24 +1,13 @@
 package cmd
 
 import (
-	"bufio"
-	"compress/gzip"
-	"encoding/json"
-	"errors"
 	"flag"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
 
 	"github.com/Doomsbay/BoldKit/internal/extract"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/markers"
-	"github.com/Doomsbay/BoldKit/internal/util"
+	"github.com/Doomsbay/BoldKit/internal/pipeline"
 )
 
 func runPipeline(args []string) {
@@ -72,341 +61,25 @@ func runPipeline(args []string) {
 		reportEvery = 1
 	}
 
-	if err := pipeline(*input, *taxonkitOut, *taxdumpDir, *markerDir, *releaseDir, *taxonkitBin, reportEvery, totalRows, *workers, !*noGzip, *force, *packageFlag, *skipManifest, *skipChecksums, snap, extractCfg, markers.ParseSelection(*markersFilter)); err != nil {
+	if err := pipeline.Run(pipeline.Config{
+		Input:         *input,
+		TaxonkitOut:   *taxonkitOut,
+		TaxdumpDir:    *taxdumpDir,
+		MarkerDir:     *markerDir,
+		ReleaseDir:    *releaseDir,
+		TaxonkitBin:   *taxonkitBin,
+		ReportEvery:   reportEvery,
+		TotalRows:     totalRows,
+		Workers:       *workers,
+		GzipMarkers:   !*noGzip,
+		Force:         *force,
+		Package:       *packageFlag,
+		SkipManifest:  *skipManifest,
+		SkipChecksums: *skipChecksums,
+		Snapshot:      snap,
+		Extract:       extractCfg,
+		Selected:      markers.ParseSelection(*markersFilter),
+	}); err != nil {
 		fatalf("pipeline failed: %v", err)
 	}
-}
-
-func pipeline(input, taxonkitOut, taxdumpDir, markerDir, releaseDir, taxonkitBin string, reportEvery, totalRows, workers int, gzipOut, force, doPackage, skipManifest, skipChecksums bool, snapshot string, extractCfg extract.CurationConfig, selected [][]byte) error {
-	util.Logf("Input format: %s", boldio.InputFormat(input))
-	util.Logf("Extract taxonomy -> %s", taxonkitOut)
-	if boldio.FileExists(taxonkitOut) && !force {
-		util.Logf("taxonkit TSV exists, skipping (use --force to overwrite): %s", taxonkitOut)
-	} else {
-		if _, err := extract.BuildTaxonkit(input, taxonkitOut, reportEvery, totalRows, extractCfg); err != nil {
-			return fmt.Errorf("build taxonkit TSV: %w", err)
-		}
-	}
-
-	util.Logf("Build taxdump -> %s", taxdumpDir)
-	if err := runTaxonkitCreate(taxonkitBin, taxonkitOut, taxdumpDir, force); err != nil {
-		return fmt.Errorf("taxonkit create-taxdump: %w", err)
-	}
-
-	util.Logf("Build marker FASTAs -> %s", markerDir)
-	selected, skipMarkers, err := markers.SelectMissing(markerDir, selected, force)
-	if err != nil {
-		return fmt.Errorf("check marker outputs: %w", err)
-	}
-	if skipMarkers {
-		util.Logf("marker FASTAs exist, skipping (use --force to overwrite): %s", markerDir)
-	} else {
-		if err := markers.BuildMarkerFastas(input, markerDir, gzipOut, reportEvery, totalRows, workers, selected); err != nil {
-			return fmt.Errorf("build markers: %w", err)
-		}
-	}
-
-	if !doPackage {
-		return nil
-	}
-
-	cfg := packageConfig{
-		TaxdumpDir:    taxdumpDir,
-		MarkerDir:     markerDir,
-		TaxonkitOut:   taxonkitOut,
-		ReleaseDir:    releaseDir,
-		Snapshot:      snapshot,
-		Force:         force,
-		SkipManifest:  skipManifest,
-		SkipChecksums: skipChecksums,
-		MoveInputs:    true,
-	}
-	return packageRelease(cfg)
-}
-
-func runTaxonkitCreate(bin, input, outputDir string, force bool) error {
-	taxonkit := bin
-	if taxonkit == "" {
-		if p, err := exec.LookPath("taxonkit"); err == nil {
-			taxonkit = p
-		} else if p, err := exec.LookPath("taxonkit.exe"); err == nil {
-			taxonkit = p
-		} else {
-			return errors.New("taxonkit not found in PATH (set --taxonkit-bin)")
-		}
-	}
-
-	if !force && boldio.FileExists(filepath.Join(outputDir, "nodes.dmp")) && boldio.FileExists(filepath.Join(outputDir, "names.dmp")) && boldio.FileExists(filepath.Join(outputDir, "taxid.map")) {
-		util.Logf("taxdump exists, skipping (use --force to overwrite): %s", outputDir)
-		return nil
-	}
-
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return fmt.Errorf("create taxdump dir: %w", err)
-	}
-
-	cmd := exec.Command(taxonkit, "create-taxdump", input, "-A", "10", "--null", "None,NULL,NA", "-O", outputDir, "--force")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func packageMarkerPath(markerDir, releaseDir, snapshot string) string {
-	suffix := ""
-	if snapshot != "" {
-		suffix = "." + safeTag(snapshot)
-	}
-	markerName := filepath.Base(markerDir) + suffix + ".tar.gz"
-	return filepath.Join(releaseDir, markerName)
-}
-
-func packageTaxdumpArchivePath(taxdumpDir, releaseDir, snapshot string) string {
-	suffix := ""
-	if snapshot != "" {
-		suffix = "." + safeTag(snapshot)
-	}
-	base := filepath.Base(taxdumpDir)
-	return filepath.Join(releaseDir, base+suffix+".tar.gz")
-}
-
-func packageTaxonkitPath(taxonkitOut, releaseDir, snapshot string) string {
-	base := filepath.Base(taxonkitOut)
-	if snapshot != "" {
-		ext := filepath.Ext(base)
-		name := strings.TrimSuffix(base, ext)
-		base = name + "." + safeTag(snapshot) + ext
-	}
-	return filepath.Join(releaseDir, base)
-}
-
-func packageTaxonkitGzipPath(taxonkitOut, releaseDir, snapshot string) string {
-	base := filepath.Base(taxonkitOut)
-	if snapshot != "" {
-		ext := filepath.Ext(base)
-		name := strings.TrimSuffix(base, ext)
-		base = name + "." + safeTag(snapshot) + ext
-	}
-	if !strings.HasSuffix(base, ".gz") {
-		base += ".gz"
-	}
-	return filepath.Join(releaseDir, base)
-}
-
-func packageTaxonkitGzip(src, dest string, force bool) error {
-	if filepath.Clean(src) == filepath.Clean(dest) {
-		util.Logf("taxonkit gzip already in release dir: %s", dest)
-		return nil
-	}
-	if boldio.FileExists(dest) && !force {
-		util.Logf("taxonkit gzip exists, skipping (use --force to overwrite): %s", dest)
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("create release dir: %w", err)
-	}
-	if strings.HasSuffix(src, ".gz") {
-		return boldio.CopyFile(src, dest)
-	}
-
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open taxonkit input: %w", err)
-	}
-	defer func() {
-		_ = in.Close()
-	}()
-
-	out, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("create taxonkit gzip: %w", err)
-	}
-	defer func() {
-		_ = out.Close()
-	}()
-
-	gzw, err := gzip.NewWriterLevel(out, gzip.BestSpeed)
-	if err != nil {
-		return fmt.Errorf("create gzip writer: %w", err)
-	}
-	if _, err := io.Copy(gzw, in); err != nil {
-		_ = gzw.Close()
-		return fmt.Errorf("gzip taxonkit input: %w", err)
-	}
-	if err := gzw.Close(); err != nil {
-		return fmt.Errorf("finalize gzip: %w", err)
-	}
-	return nil
-}
-
-func writeChecksums(releaseDir, outputFile string, force bool) error {
-	if boldio.FileExists(outputFile) && !force {
-		util.Logf("checksums exist, skipping (use --force to overwrite): %s", outputFile)
-		return nil
-	}
-
-	patterns := []string{"*.zip", "*.tar.gz", "*.tsv.gz"}
-	seen := make(map[string]struct{})
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(filepath.Join(releaseDir, pattern))
-		if err != nil {
-			return err
-		}
-		for _, match := range matches {
-			seen[match] = struct{}{}
-		}
-	}
-	if len(seen) == 0 {
-		return fmt.Errorf("no packaged files found in %s", releaseDir)
-	}
-	files := make([]string, 0, len(seen))
-	for f := range seen {
-		files = append(files, f)
-	}
-	sort.Strings(files)
-
-	out, err := os.Create(outputFile)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = out.Close()
-	}()
-
-	for _, f := range files {
-		sum, err := boldio.SHA256File(f)
-		if err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(out, "%s  %s\n", sum, filepath.Base(f)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeManifest(path, taxdumpDir, markerDir, snapshot string, force bool) error {
-	if boldio.FileExists(path) && !force {
-		util.Logf("manifest exists, skipping (use --force to overwrite): %s", path)
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	commit := "unknown"
-	if c, err := gitCommitHash(); err == nil && c != "" {
-		commit = c
-	}
-
-	nodes, err := boldio.CountLines(filepath.Join(taxdumpDir, "nodes.dmp"))
-	if err != nil {
-		return err
-	}
-	names, err := boldio.CountLines(filepath.Join(taxdumpDir, "names.dmp"))
-	if err != nil {
-		return err
-	}
-	taxid, err := boldio.CountLines(filepath.Join(taxdumpDir, "taxid.map"))
-	if err != nil {
-		return err
-	}
-
-	markerFiles, err := listMarkerFiles(markerDir)
-	if err != nil {
-		return err
-	}
-	markerSeqs, err := countMarkerSeqs(markerFiles)
-	if err != nil {
-		return err
-	}
-
-	manifest := struct {
-		SnapshotID string `json:"snapshot_id"`
-		CommitHash string `json:"commit_hash"`
-		Counts     struct {
-			Nodes                int `json:"nodes"`
-			Names                int `json:"names"`
-			TaxidMap             int `json:"taxid_map"`
-			MarkerFastaFiles     int `json:"marker_fasta_files"`
-			MarkerFastaSequences int `json:"marker_fasta_sequences"`
-		} `json:"counts"`
-	}{
-		SnapshotID: snapshot,
-		CommitHash: commit,
-	}
-	manifest.Counts.Nodes = nodes
-	manifest.Counts.Names = names
-	manifest.Counts.TaxidMap = taxid
-	manifest.Counts.MarkerFastaFiles = len(markerFiles)
-	manifest.Counts.MarkerFastaSequences = markerSeqs
-
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
-}
-
-func gitCommitHash() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Stderr = io.Discard
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func listMarkerFiles(markerDir string) ([]string, error) {
-	var files []string
-	err := filepath.Walk(markerDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if strings.HasSuffix(info.Name(), ".fasta") || strings.HasSuffix(info.Name(), ".fasta.gz") {
-			files = append(files, path)
-		}
-		return nil
-	})
-	return files, err
-}
-
-func countMarkerSeqs(paths []string) (int, error) {
-	total := 0
-	for _, p := range paths {
-		rc, err := boldio.OpenInput(p)
-		if err != nil {
-			return 0, fmt.Errorf("open %s: %w", p, err)
-		}
-		scanner := bufio.NewScanner(rc)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) > 0 && line[0] == '>' {
-				total++
-			}
-		}
-		_ = rc.Close()
-		if err := scanner.Err(); err != nil {
-			return 0, fmt.Errorf("scan %s: %w", p, err)
-		}
-	}
-	return total, nil
-}
-
-func safeTag(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
-			b.WriteByte(c)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	return b.String()
 }

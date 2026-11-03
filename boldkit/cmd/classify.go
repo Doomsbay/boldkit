@@ -83,7 +83,7 @@ func runClassify(args []string) {
 			if err != nil {
 				fatalf("marker %s: %v", marker, err)
 			}
-			baseOut := filepath.Join(*outDir, safeTag(marker))
+			baseOut := filepath.Join(*outDir, util.SafeTag(marker))
 			if err := run(markerInput, baseOut); err != nil {
 				fatalf("classify %s failed: %v", marker, err)
 			}
