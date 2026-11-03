@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Split logic moved from `cmd/` into `internal/split/` behind `SplitOne` + `Config`; QC settings pass through `qc.Config` directly.
+- Classify logic moved into `internal/classify/` (`Classify` + `Config`, replacing an 18-parameter function), and pipeline/release logic into `internal/pipeline/` (`Run`, `PackageRelease`, `WriteManifest`, `WriteChecksums`); `SafeTag` moved to `internal/util`.
 
 ### Fixed
 - Split planning now detects species conflicts before QC deduplication can hide them: a barcode shared by records with different species labels is excluded from classifier training (moved to `pretrain`) regardless of record order, and `split_report.json` reports `conflict_groups`/`conflict_records`.
