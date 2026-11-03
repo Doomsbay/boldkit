@@ -33,6 +33,31 @@ func DefaultStrategy() SplitStrategy {
 	}
 }
 
+func (s SplitStrategy) isZero() bool {
+	return s.MinSeenRecords == 0 && s.MinSeenBarcodes == 0 && s.MaxTestTargetPerClass == 0 &&
+		s.SeenTestTarget == 0 && s.SeenValTarget == 0 && s.UnseenValTarget == 0 && s.HeldoutFrac == 0
+}
+
+func (s SplitStrategy) validate() error {
+	if s.MinSeenRecords < 0 || s.MinSeenBarcodes < 0 || s.MaxTestTargetPerClass < 0 {
+		return fmt.Errorf("split strategy record and barcode thresholds must be non-negative")
+	}
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"seen test fraction", s.SeenTestTarget},
+		{"seen validation fraction", s.SeenValTarget},
+		{"unseen validation fraction", s.UnseenValTarget},
+		{"heldout fraction", s.HeldoutFrac},
+	} {
+		if f.value < 0 || f.value > 1 {
+			return fmt.Errorf("split strategy %s must be within [0,1]: %g", f.name, f.value)
+		}
+	}
+	return nil
+}
+
 type barcodeUnit struct {
 	hash  [16]byte
 	count int
@@ -119,6 +144,9 @@ func detectSequenceLabelConflicts(input string, labels map[string]string, invali
 }
 
 func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}, preConflicted map[[16]byte]struct{}, strategy SplitStrategy) (splitPlan, splitStats, error) {
+	if err := strategy.validate(); err != nil {
+		return splitPlan{}, splitStats{}, err
+	}
 	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return splitPlan{}, splitStats{}, fmt.Errorf("open input: %w", err)

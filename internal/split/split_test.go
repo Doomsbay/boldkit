@@ -93,7 +93,7 @@ func writeSplitTaxdump(t *testing.T, dir string, pids []string) {
 	}
 }
 
-func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitStats, string) {
+func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitReport, string) {
 	t.Helper()
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, gammaFirst)
@@ -129,11 +129,12 @@ func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitStats, st
 	if err := json.Unmarshal(reportData, &report); err != nil {
 		t.Fatal(err)
 	}
-	return report.Stats, outDir
+	return report, outDir
 }
 
 func TestSplitConflictExcludedFromTrainingUnderQCDedup(t *testing.T) {
-	stats, outDir := runSplitFixture(t, true, true)
+	report, outDir := runSplitFixture(t, true, true)
+	stats := report.Stats
 
 	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
 		t.Fatalf("unexpected conflict stats: %+v", stats)
@@ -167,13 +168,14 @@ func TestSplitConflictExcludedFromTrainingUnderQCDedup(t *testing.T) {
 func TestSplitConflictClassificationOrderIndependent(t *testing.T) {
 	forward, _ := runSplitFixture(t, true, true)
 	reversed, _ := runSplitFixture(t, true, false)
-	if forward != reversed {
-		t.Fatalf("split stats depend on record order:\nforward: %+v\nreversed: %+v", forward, reversed)
+	if forward.Stats != reversed.Stats {
+		t.Fatalf("split stats depend on record order:\nforward: %+v\nreversed: %+v", forward.Stats, reversed.Stats)
 	}
 }
 
 func TestSplitConflictExcludedWithDedupeDisabled(t *testing.T) {
-	stats, outDir := runSplitFixture(t, false, true)
+	report, outDir := runSplitFixture(t, false, true)
+	stats := report.Stats
 
 	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
 		t.Fatalf("unexpected conflict stats: %+v", stats)
@@ -376,6 +378,81 @@ func TestBuildSplitPlanDetectsConflictsWithoutQC(t *testing.T) {
 	}
 	if stats.ConflictGroups != 1 || stats.ConflictRecords != 2 {
 		t.Fatalf("unexpected conflict stats: %+v", stats)
+	}
+}
+
+func TestSplitReportRecordsEffectiveStrategy(t *testing.T) {
+	report, _ := runSplitFixture(t, true, true)
+	if want := newStrategyReport(DefaultStrategy()); report.Strategy != want {
+		t.Fatalf("report strategy %+v, want %+v", report.Strategy, want)
+	}
+}
+
+func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
+	dir := t.TempDir()
+	input, taxonkit := writeSplitFixture(t, dir, true)
+
+	fastaIDs, err := collectFastaIDs(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkit, fastaIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raiseSeenBar := DefaultStrategy()
+	raiseSeenBar.MinSeenRecords = 20
+	_, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, raiseSeenBar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.SeenClasses != 0 || stats.TotalClasses != 2 {
+		t.Fatalf("expected no seen classes with raised bar: %+v", stats)
+	}
+
+	noHeldout := DefaultStrategy()
+	noHeldout.HeldoutFrac = 0
+	_, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, noHeldout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.UnseenClasses != 0 || stats.HeldoutClasses != 1 {
+		t.Fatalf("expected heldout-frac 0 to hold out every non-seen species: %+v", stats)
+	}
+
+	noHeldoutSplit := DefaultStrategy()
+	noHeldoutSplit.HeldoutFrac = 1
+	_, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, noHeldoutSplit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.UnseenClasses != 1 || stats.HeldoutClasses != 0 {
+		t.Fatalf("expected heldout-frac 1 to keep every non-seen species unseen: %+v", stats)
+	}
+
+	tightTest := DefaultStrategy()
+	tightTest.MaxTestTargetPerClass = 1
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, tightTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.SeenClasses != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	counts := make(map[string]int)
+	for _, seq := range splitTestGammaSequences() {
+		hash := md5.Sum([]byte(seq))
+		counts[plan.seqBucket[hash]]++
+	}
+	if counts[bucketSeenTest] != 1 || counts[bucketSeenVal] != 1 || counts[bucketSeenTrain] != 6 {
+		t.Fatalf("test-cap 1 should leave one test, one val and six train records: %+v", counts)
+	}
+
+	outOfRange := DefaultStrategy()
+	outOfRange.SeenValTarget = 1.5
+	if _, _, err := buildSplitPlan(input, labels, invalidIDs, nil, outOfRange); err == nil {
+		t.Fatal("expected out-of-range fraction to fail")
 	}
 }
 

@@ -20,6 +20,14 @@ func runSplit(args []string) {
 	taxidMap := fs.String("taxid-map", "", "Optional taxid.map override")
 	taxonkitIn := fs.String("taxonkit-input", "taxonkit_input.tsv", "Taxonkit TSV with processid/species labels")
 	requireRanks := fs.String("require-ranks", "kingdom,phylum,class,order,family,genus,species", "Comma-separated ranks required to keep a sequence (empty disables)")
+	strategy := split.DefaultStrategy()
+	fs.IntVar(&strategy.MinSeenRecords, "seen-min-records", strategy.MinSeenRecords, "Min records for a species to qualify as seen")
+	fs.IntVar(&strategy.MinSeenBarcodes, "seen-min-bins", strategy.MinSeenBarcodes, "Min distinct barcode groups for a species to qualify as seen")
+	fs.IntVar(&strategy.MaxTestTargetPerClass, "test-cap", strategy.MaxTestTargetPerClass, "Ceiling on test records per species")
+	fs.Float64Var(&strategy.SeenTestTarget, "test-frac", strategy.SeenTestTarget, "Test fraction target for seen classes")
+	fs.Float64Var(&strategy.SeenValTarget, "val-frac-seen", strategy.SeenValTarget, "Validation fraction target for seen classes")
+	fs.Float64Var(&strategy.UnseenValTarget, "val-frac-unseen", strategy.UnseenValTarget, "Validation fraction target for unseen classes")
+	fs.Float64Var(&strategy.HeldoutFrac, "heldout-frac", strategy.HeldoutFrac, "Fraction of unseen classes held out entirely (0 disables the heldout bucket)")
 	runQC := fs.Bool("run-qc", true, "Run QC before splitting")
 	qcMin := fs.Int("qc-min-length", 200, "QC minimum cleaned length")
 	qcMax := fs.Int("qc-max-length", 700, "QC maximum cleaned length")
@@ -55,6 +63,7 @@ func runSplit(args []string) {
 			TaxidMapPath:   *taxidMap,
 			RunQC:          *runQC,
 			FormatProgress: *formatProgress,
+			Strategy:       strategy,
 			QC: qc.Config{
 				MinLen:     *qcMin,
 				MaxLen:     *qcMax,

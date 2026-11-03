@@ -41,12 +41,27 @@ type splitStats struct {
 	ConflictRecords  int `json:"conflict_records"`
 }
 
+type strategyReport struct {
+	MinSeenRecords        int     `json:"min_seen_records"`
+	MinSeenBarcodes       int     `json:"min_seen_barcodes"`
+	MaxTestTargetPerClass int     `json:"max_test_target_per_class"`
+	SeenTestTarget        float64 `json:"seen_test_frac"`
+	SeenValTarget         float64 `json:"seen_val_frac"`
+	UnseenValTarget       float64 `json:"unseen_val_frac"`
+	HeldoutFrac           float64 `json:"heldout_frac"`
+}
+
+func newStrategyReport(s SplitStrategy) strategyReport {
+	return strategyReport(s)
+}
+
 type splitReport struct {
-	Input       string     `json:"input"`
-	OutDir      string     `json:"out_dir"`
-	Classifiers []string   `json:"classifiers"`
-	PrunedTaxa  int        `json:"pruned_taxids"`
-	Stats       splitStats `json:"stats"`
+	Input       string         `json:"input"`
+	OutDir      string         `json:"out_dir"`
+	Classifiers []string       `json:"classifiers"`
+	PrunedTaxa  int            `json:"pruned_taxids"`
+	Strategy    strategyReport `json:"strategy"`
+	Stats       splitStats     `json:"stats"`
 }
 
 type Config struct {
@@ -60,6 +75,7 @@ type Config struct {
 	QC             qc.Config
 	RunQC          bool
 	FormatProgress bool
+	Strategy       SplitStrategy
 }
 
 func SplitOne(cfg Config) error {
@@ -104,7 +120,11 @@ func SplitOne(cfg Config) error {
 		}
 	}
 
-	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs, conflicts.hashes, DefaultStrategy())
+	strategy := cfg.Strategy
+	if strategy.isZero() {
+		strategy = DefaultStrategy()
+	}
+	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs, conflicts.hashes, strategy)
 	if err != nil {
 		return err
 	}
@@ -154,6 +174,7 @@ func SplitOne(cfg Config) error {
 		OutDir:      cfg.OutDir,
 		Classifiers: cfg.Classifiers,
 		PrunedTaxa:  keptTaxids,
+		Strategy:    newStrategyReport(strategy),
 		Stats:       stats,
 	}); err != nil {
 		return err
