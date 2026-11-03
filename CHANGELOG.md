@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Configurable split thresholds: `-seen-min-records`, `-seen-min-bins`, `-test-cap`, `-test-frac`, `-val-frac-seen`, `-val-frac-unseen`, `-heldout-frac` on `split` (and the `SplitStrategy` config for library callers). Defaults reproduce the previous hardcoded BIOSCAN-5M assignment exactly, and `split_report.json` records the effective strategy.
+- `split -include-species <file>` forces listed species into the seen training reference regardless of thresholds and guarantees them at least one training barcode group even when test/validation targets consume every group; `-holdout-species <file>` forces every record of the listed species into the heldout bucket. Include outranks holdout, and names missing from the input are counted in the report (`include_unknown`/`holdout_unknown`) with a warning.
+
+### Changed
+- Split logic moved from `cmd/` into `internal/split/` behind `SplitOne` + `Config`; QC settings pass through `qc.Config` directly.
+
 ### Fixed
 - Split planning now detects species conflicts before QC deduplication can hide them: a barcode shared by records with different species labels is excluded from classifier training (moved to `pretrain`) regardless of record order, and `split_report.json` reports `conflict_groups`/`conflict_records`.
 - Split bucket FASTAs and pruned taxdump files are published transactionally (`.tmp` + rename with backup/restore): flush/close/publish failures propagate, existing outputs are preserved on failure, and a success report can no longer describe unwritten outputs.
