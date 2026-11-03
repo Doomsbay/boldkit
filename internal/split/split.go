@@ -39,6 +39,11 @@ type splitStats struct {
 	PretrainRecords  int `json:"pretrain_records"`
 	ConflictGroups   int `json:"conflict_groups"`
 	ConflictRecords  int `json:"conflict_records"`
+
+	ForcedSeenClasses    int `json:"forced_seen_classes"`
+	ForcedHeldoutClasses int `json:"forced_heldout_classes"`
+	IncludeUnknown       int `json:"include_unknown"`
+	HoldoutUnknown       int `json:"holdout_unknown"`
 }
 
 type strategyReport struct {
@@ -52,7 +57,15 @@ type strategyReport struct {
 }
 
 func newStrategyReport(s SplitStrategy) strategyReport {
-	return strategyReport(s)
+	return strategyReport{
+		MinSeenRecords:        s.MinSeenRecords,
+		MinSeenBarcodes:       s.MinSeenBarcodes,
+		MaxTestTargetPerClass: s.MaxTestTargetPerClass,
+		SeenTestTarget:        s.SeenTestTarget,
+		SeenValTarget:         s.SeenValTarget,
+		UnseenValTarget:       s.UnseenValTarget,
+		HeldoutFrac:           s.HeldoutFrac,
+	}
 }
 
 type splitReport struct {

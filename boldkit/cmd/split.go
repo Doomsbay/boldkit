@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"flag"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Doomsbay/BoldKit/internal/qc"
 	"github.com/Doomsbay/BoldKit/internal/split"
@@ -28,6 +31,8 @@ func runSplit(args []string) {
 	fs.Float64Var(&strategy.SeenValTarget, "val-frac-seen", strategy.SeenValTarget, "Validation fraction target for seen classes")
 	fs.Float64Var(&strategy.UnseenValTarget, "val-frac-unseen", strategy.UnseenValTarget, "Validation fraction target for unseen classes")
 	fs.Float64Var(&strategy.HeldoutFrac, "heldout-frac", strategy.HeldoutFrac, "Fraction of unseen classes held out entirely (0 disables the heldout bucket)")
+	includeSpecies := fs.String("include-species", "", "File listing species forced into the seen training reference (one name per line)")
+	holdoutSpecies := fs.String("holdout-species", "", "File listing species forced into the heldout bucket (one name per line)")
 	runQC := fs.Bool("run-qc", true, "Run QC before splitting")
 	qcMin := fs.Int("qc-min-length", 200, "QC minimum cleaned length")
 	qcMax := fs.Int("qc-max-length", 700, "QC maximum cleaned length")
@@ -50,6 +55,20 @@ func runSplit(args []string) {
 	}
 	if err := qc.ValidateGapPolicy(*qcGapPolicy); err != nil {
 		fatalf("%v", err)
+	}
+	if *includeSpecies != "" {
+		names, err := readSpeciesList(*includeSpecies)
+		if err != nil {
+			fatalf("read include species list: %v", err)
+		}
+		strategy.IncludeSpecies = names
+	}
+	if *holdoutSpecies != "" {
+		names, err := readSpeciesList(*holdoutSpecies)
+		if err != nil {
+			fatalf("read holdout species list: %v", err)
+		}
+		strategy.HoldoutSpecies = names
 	}
 
 	run := func(input, outDir string) error {
@@ -99,4 +118,19 @@ func runSplit(args []string) {
 	if err := run(*input, *outDir); err != nil {
 		fatalf("split failed: %v", err)
 	}
+}
+
+func readSpeciesList(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(data), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }

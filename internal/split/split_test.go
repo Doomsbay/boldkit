@@ -456,6 +456,143 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 	}
 }
 
+func writeTwoGroupFixture(t *testing.T, dir string) (input, taxonkit string) {
+	t.Helper()
+	var fasta strings.Builder
+	for i := 0; i < 7; i++ {
+		fmt.Fprintf(&fasta, ">D%d\nACGTACGTAC\n", i)
+	}
+	fasta.WriteString(">D7\nTTTTGGCCAA\n")
+	input = filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(fasta.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var tsv strings.Builder
+	tsv.WriteString("processid\tspecies\n")
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&tsv, "D%d\tDelta\n", i)
+	}
+	taxonkit = filepath.Join(dir, "taxonkit_input.tsv")
+	if err := os.WriteFile(taxonkit, []byte(tsv.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return input, taxonkit
+}
+
+func TestSplitIncludeSpeciesForcesSeenWithTrainingRecord(t *testing.T) {
+	dir := t.TempDir()
+	input, taxonkit := writeSplitFixture(t, dir, true)
+
+	fastaIDs, err := collectFastaIDs(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkit, fastaIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strategy := DefaultStrategy()
+	strategy.IncludeSpecies = []string{"Alpha"}
+	strategy.HoldoutSpecies = []string{"Alpha"}
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.SeenClasses != 2 || stats.ForcedSeenClasses != 1 {
+		t.Fatalf("expected Alpha forced seen alongside Gamma: %+v", stats)
+	}
+	if stats.HeldoutClasses != 0 || stats.ForcedHeldoutClasses != 0 {
+		t.Fatalf("include must outrank holdout: %+v", stats)
+	}
+	hash := md5.Sum([]byte("TTTTGGCCAA"))
+	if plan.seqBucket[hash] != bucketSeenTrain {
+		t.Fatalf("forced single-barcode species landed in %s, want %s", plan.seqBucket[hash], bucketSeenTrain)
+	}
+}
+
+func TestSplitIncludeSpeciesGuaranteesTrainingWithTwoGroups(t *testing.T) {
+	dir := t.TempDir()
+	input, taxonkit := writeTwoGroupFixture(t, dir)
+
+	fastaIDs, err := collectFastaIDs(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkit, fastaIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.SeenClasses != 1 {
+		t.Fatalf("expected Delta to qualify as seen: %+v", stats)
+	}
+	for _, seq := range []string{"ACGTACGTAC", "TTTTGGCCAA"} {
+		if plan.seqBucket[md5.Sum([]byte(seq))] == bucketSeenTrain {
+			t.Fatal("greedy allocation was expected to leave seen_train empty for a 7+1 species")
+		}
+	}
+
+	strategy := DefaultStrategy()
+	strategy.IncludeSpecies = []string{"Delta"}
+	forcedPlan, forcedStats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forcedStats.SeenClasses != 1 || forcedStats.ForcedSeenClasses != 1 {
+		t.Fatalf("unexpected forced stats: %+v", forcedStats)
+	}
+	trainUnits := 0
+	for _, seq := range []string{"ACGTACGTAC", "TTTTGGCCAA"} {
+		if forcedPlan.seqBucket[md5.Sum([]byte(seq))] == bucketSeenTrain {
+			trainUnits++
+		}
+	}
+	if trainUnits != 1 {
+		t.Fatalf("forced species must retain exactly one training unit, got %d", trainUnits)
+	}
+}
+
+func TestSplitHoldoutSpeciesForcedToHeldout(t *testing.T) {
+	dir := t.TempDir()
+	input, taxonkit := writeSplitFixture(t, dir, true)
+
+	fastaIDs, err := collectFastaIDs(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, invalidIDs, err := loadProcessLabelMap(taxonkit, fastaIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strategy := DefaultStrategy()
+	strategy.HoldoutSpecies = []string{"Gamma", "NoSuchSpecies"}
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.SeenClasses != 0 || stats.HeldoutClasses != 1 || stats.ForcedHeldoutClasses != 1 {
+		t.Fatalf("expected Gamma forced to heldout: %+v", stats)
+	}
+	if stats.UnseenClasses != 1 {
+		t.Fatalf("expected Alpha to stay unseen under the default policy: %+v", stats)
+	}
+	if stats.HoldoutUnknown != 1 {
+		t.Fatalf("unknown holdout species must be counted: %+v", stats)
+	}
+	for i, seq := range splitTestGammaSequences() {
+		if plan.seqBucket[md5.Sum([]byte(seq))] != bucketHeldout {
+			t.Fatalf("G%d not held out", i)
+		}
+	}
+}
+
 func TestBuildSplitPlanDefaultStrategyGoldenBuckets(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, true)

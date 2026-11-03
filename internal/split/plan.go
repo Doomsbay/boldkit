@@ -19,6 +19,8 @@ type SplitStrategy struct {
 	SeenValTarget         float64
 	UnseenValTarget       float64
 	HeldoutFrac           float64
+	IncludeSpecies        []string
+	HoldoutSpecies        []string
 }
 
 func DefaultStrategy() SplitStrategy {
@@ -35,7 +37,8 @@ func DefaultStrategy() SplitStrategy {
 
 func (s SplitStrategy) isZero() bool {
 	return s.MinSeenRecords == 0 && s.MinSeenBarcodes == 0 && s.MaxTestTargetPerClass == 0 &&
-		s.SeenTestTarget == 0 && s.SeenValTarget == 0 && s.UnseenValTarget == 0 && s.HeldoutFrac == 0
+		s.SeenTestTarget == 0 && s.SeenValTarget == 0 && s.UnseenValTarget == 0 && s.HeldoutFrac == 0 &&
+		len(s.IncludeSpecies) == 0 && len(s.HoldoutSpecies) == 0
 }
 
 func (s SplitStrategy) validate() error {
@@ -206,6 +209,22 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 	}
 
 	heldoutThreshold := heldoutHashThreshold(strategy.HeldoutFrac)
+	includeSet := speciesSet(strategy.IncludeSpecies)
+	holdoutSet := speciesSet(strategy.HoldoutSpecies)
+	for name := range includeSet {
+		if _, ok := speciesUnits[name]; !ok {
+			stats.IncludeUnknown++
+		}
+	}
+	for name := range holdoutSet {
+		if _, ok := speciesUnits[name]; !ok {
+			stats.HoldoutUnknown++
+		}
+	}
+	if stats.IncludeUnknown > 0 || stats.HoldoutUnknown > 0 {
+		util.Logf("split: %d include and %d holdout species not found among input species", stats.IncludeUnknown, stats.HoldoutUnknown)
+	}
+
 	stats.TotalClasses = len(speciesUnits)
 	for label, units := range speciesUnits {
 		total := speciesCounts[label]
@@ -213,6 +232,29 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 		sort.Slice(units, func(i, j int) bool {
 			return lessHash(units[i].hash, units[j].hash)
 		})
+
+		if _, forced := includeSet[label]; forced {
+			stats.SeenClasses++
+			stats.ForcedSeenClasses++
+			testTarget := minInt(strategy.MaxTestTargetPerClass, ceilDiv(permill(strategy.SeenTestTarget)*total, 1000))
+			valTarget := ceilDiv(permill(strategy.SeenValTarget)*(total-testTarget), 1000)
+			assignUnits(seqBucket, units, []splitTarget{
+				{bucket: bucketSeenTest, target: testTarget},
+				{bucket: bucketSeenVal, target: valTarget},
+				{bucket: bucketSeenTrain, target: -1},
+			})
+			guaranteeTrainingUnit(seqBucket, units)
+			continue
+		}
+
+		if _, forced := holdoutSet[label]; forced {
+			stats.HeldoutClasses++
+			stats.ForcedHeldoutClasses++
+			for _, unit := range units {
+				seqBucket[unit.hash] = bucketHeldout
+			}
+			continue
+		}
 
 		if total >= strategy.MinSeenRecords && uniqueBarcodes >= strategy.MinSeenBarcodes {
 			stats.SeenClasses++
@@ -275,6 +317,34 @@ func assignUnits(seqBucket map[[16]byte]string, units []barcodeUnit, targets []s
 			seqBucket[units[idx].hash] = t.bucket
 			acc += units[idx].count
 			idx++
+		}
+	}
+}
+
+func speciesSet(names []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		set[name] = struct{}{}
+	}
+	return set
+}
+
+func guaranteeTrainingUnit(seqBucket map[[16]byte]string, units []barcodeUnit) {
+	for _, unit := range units {
+		if seqBucket[unit.hash] == bucketSeenTrain {
+			return
+		}
+	}
+	for i := len(units) - 1; i >= 0; i-- {
+		if seqBucket[units[i].hash] == bucketSeenVal {
+			seqBucket[units[i].hash] = bucketSeenTrain
+			return
+		}
+	}
+	for i := len(units) - 1; i >= 0; i-- {
+		if seqBucket[units[i].hash] == bucketSeenTest {
+			seqBucket[units[i].hash] = bucketSeenTrain
+			return
 		}
 	}
 }
