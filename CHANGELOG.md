@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.8.0]
 
 ### Added
 - Configurable split thresholds: `-seen-min-records`, `-seen-min-bins`, `-test-cap`, `-test-frac`, `-val-frac-seen`, `-val-frac-unseen`, `-heldout-frac` on `split` (and the `SplitStrategy` config for library callers). Defaults reproduce the previous hardcoded BIOSCAN-5M assignment exactly, and `split_report.json` records the effective strategy.
