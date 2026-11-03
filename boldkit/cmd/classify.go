@@ -4,9 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
-	"strings"
 
-	"github.com/Doomsbay/BoldKit/internal/format"
+	"github.com/Doomsbay/BoldKit/internal/classify"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/qc"
 	"github.com/Doomsbay/BoldKit/internal/util"
@@ -48,6 +47,32 @@ func runClassify(args []string) {
 		fatalf("%v", err)
 	}
 
+	run := func(input, outDir string) error {
+		return classify.Classify(classify.Config{
+			Input:        input,
+			OutDir:       outDir,
+			Classifiers:  classifierList,
+			Ranks:        ranks,
+			TaxdumpDir:   *taxdumpDir,
+			TaxidMapPath: *taxidMap,
+			QC: qc.Config{
+				MinLen:     *qcMin,
+				MaxLen:     *qcMax,
+				MaxN:       *qcMaxN,
+				MaxAmbig:   *qcMaxAmbig,
+				MaxInvalid: *qcMaxInvalid,
+				GapPolicy:  *qcGapPolicy,
+				DedupeSeqs: *qcDedupe,
+				DedupeIDs:  *qcDedupeIDs,
+				Progress:   *qcProgress,
+			},
+			QCOnly:         *qcOnly,
+			Compress:       *compress,
+			Force:          *force,
+			FormatProgress: *formatProgress,
+		})
+	}
+
 	if *input == "" {
 		markerList := util.SplitList(*markers)
 		if len(markerList) == 0 {
@@ -59,74 +84,16 @@ func runClassify(args []string) {
 				fatalf("marker %s: %v", marker, err)
 			}
 			baseOut := filepath.Join(*outDir, safeTag(marker))
-			if err := classifyOne(markerInput, baseOut, classifierList, ranks, *taxdumpDir, *taxidMap, *qcMin, *qcMax, *qcMaxN, *qcMaxAmbig, *qcMaxInvalid, *qcGapPolicy, *qcDedupe, *qcDedupeIDs, *qcProgress, *formatProgress, *qcOnly, *compress, *force); err != nil {
+			if err := run(markerInput, baseOut); err != nil {
 				fatalf("classify %s failed: %v", marker, err)
 			}
 		}
 		return
 	}
 
-	if err := classifyOne(*input, *outDir, classifierList, ranks, *taxdumpDir, *taxidMap, *qcMin, *qcMax, *qcMaxN, *qcMaxAmbig, *qcMaxInvalid, *qcGapPolicy, *qcDedupe, *qcDedupeIDs, *qcProgress, *formatProgress, *qcOnly, *compress, *force); err != nil {
+	if err := run(*input, *outDir); err != nil {
 		fatalf("classify failed: %v", err)
 	}
-}
-
-func classifyOne(input, outDir string, classifierList, ranks []string, taxdumpDir, taxidMap string, qcMin, qcMax, qcMaxN, qcMaxAmbig, qcMaxInvalid int, qcGapPolicy string, qcDedupe, qcDedupeIDs, qcProgress, formatProgress, qcOnly, compress, force bool) error {
-	base := boldio.QCBaseName(input)
-	qcOut := filepath.Join(outDir, "qc", base+".fasta")
-	qcCfg := qc.Config{
-		MinLen:       qcMin,
-		MaxLen:       qcMax,
-		MaxN:         qcMaxN,
-		MaxAmbig:     qcMaxAmbig,
-		MaxInvalid:   qcMaxInvalid,
-		GapPolicy:    qcGapPolicy,
-		DedupeSeqs:   qcDedupe,
-		DedupeIDs:    qcDedupeIDs,
-		RequireRanks: ranks,
-		TaxdumpDir:   taxdumpDir,
-		TaxidMapPath: taxidMap,
-		OutputPath:   qcOut,
-		Progress:     qcProgress,
-	}
-
-	util.Logf("QC -> %s", qcOut)
-	if err := qc.RunQC(input, qcCfg); err != nil {
-		return fmt.Errorf("qc failed: %w", err)
-	}
-
-	if qcOnly {
-		return nil
-	}
-
-	for _, classifier := range classifierList {
-		if classifier == "" {
-			continue
-		}
-		name := strings.ToLower(classifier)
-		outPath := filepath.Join(outDir, name)
-		cfg := format.FormatConfig{
-			Classifiers:  []string{name},
-			RequireRanks: ranks,
-			Input:        qcOut,
-			OutDir:       outPath,
-			TaxdumpDir:   taxdumpDir,
-			TaxidMapPath: taxidMap,
-			Progress:     formatProgress,
-		}
-		util.Logf("Format %s -> %s", name, outPath)
-		if err := format.FormatFasta(cfg); err != nil {
-			return fmt.Errorf("format %s failed: %w", name, err)
-		}
-
-		if compress {
-			archive := filepath.Join(outDir, name+".tar.gz")
-			if err := boldio.PackageDirGzip(outPath, archive, force); err != nil {
-				return fmt.Errorf("compress %s failed: %w", name, err)
-			}
-		}
-	}
-	return nil
 }
 
 func resolveMarkerInput(markerDir, marker string) (string, error) {
