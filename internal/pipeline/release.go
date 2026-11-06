@@ -405,10 +405,21 @@ func WriteManifest(path, taxdumpDir, markerDir, snapshot, version string, force 
 
 func releaseCommitHash(version string) string {
 	if info, ok := debug.ReadBuildInfo(); ok {
+		revision := ""
+		modified := false
 		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" && setting.Value != "" {
-				return setting.Value
+			switch setting.Key {
+			case "vcs.revision":
+				revision = setting.Value
+			case "vcs.modified":
+				modified = setting.Value == "true"
 			}
+		}
+		if revision != "" {
+			if modified {
+				revision += "-dirty"
+			}
+			return revision
 		}
 		if v := info.Main.Version; v != "" && v != "(devel)" {
 			return v
