@@ -32,57 +32,36 @@ func PackageRelease(cfg ReleaseConfig) error {
 	if err := checkPackageOutputs(cfg); err != nil {
 		return fmt.Errorf("check release outputs: %w", err)
 	}
+	if err := checkPackageInputs(cfg); err != nil {
+		return fmt.Errorf("check release inputs: %w", err)
+	}
 	if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
 		return fmt.Errorf("create releases dir: %w", err)
 	}
 
-	taxdumpDir := cfg.TaxdumpDir
-	markerDir := cfg.MarkerDir
-	taxonkitSource := cfg.TaxonkitOut
-	taxonkitRelease := ""
 	taxonkitGz := packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot)
-	removeTaxonkitPlain := false
 	taxonkitIsGz := strings.HasSuffix(cfg.TaxonkitOut, ".gz")
 
-	if cfg.MoveInputs {
-		var err error
-		taxdumpDir, err = moveDirInto(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Force)
-		if err != nil {
-			return err
-		}
-		markerDir, err = moveDirInto(cfg.MarkerDir, cfg.ReleaseDir, cfg.Force)
-		if err != nil {
-			return err
-		}
-		taxonkitRelease = packageTaxonkitPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot)
-		if err := movePath(cfg.TaxonkitOut, taxonkitRelease, cfg.Force); err != nil {
-			return err
-		}
-		taxonkitSource = taxonkitRelease
-		removeTaxonkitPlain = !taxonkitIsGz
-	}
-
-	markerZip := packageMarkerPath(markerDir, cfg.ReleaseDir, cfg.Snapshot)
-	taxdumpArchive := packageTaxdumpArchivePath(taxdumpDir, cfg.ReleaseDir, cfg.Snapshot)
-
+	taxdumpArchive := packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot)
 	util.Logf("Package taxdump archive -> %s", taxdumpArchive)
-	if err := boldio.PackageDirGzip(taxdumpDir, taxdumpArchive, cfg.Force); err != nil {
+	if err := boldio.PackageDirGzip(cfg.TaxdumpDir, taxdumpArchive, cfg.Force); err != nil {
 		return err
 	}
 
+	markerZip := packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot)
 	util.Logf("Package marker archive -> %s", markerZip)
-	if err := boldio.PackageDirGzip(markerDir, markerZip, cfg.Force); err != nil {
+	if err := boldio.PackageDirGzip(cfg.MarkerDir, markerZip, cfg.Force); err != nil {
 		return err
 	}
 
 	if !taxonkitIsGz {
 		util.Logf("Package taxonkit input gzip -> %s", taxonkitGz)
-		if err := packageTaxonkitGzip(taxonkitSource, taxonkitGz, cfg.Force); err != nil {
+		if err := packageTaxonkitGzip(cfg.TaxonkitOut, taxonkitGz, cfg.Force); err != nil {
 			return err
 		}
-	} else if taxonkitSource != taxonkitGz {
-		util.Logf("Package taxonkit input gzip -> %s", taxonkitGz)
-		if err := boldio.CopyFile(taxonkitSource, taxonkitGz); err != nil {
+	} else if !cfg.MoveInputs && filepath.Clean(cfg.TaxonkitOut) != filepath.Clean(taxonkitGz) {
+		util.Logf("Copy taxonkit input gzip -> %s", taxonkitGz)
+		if err := boldio.CopyFile(cfg.TaxonkitOut, taxonkitGz); err != nil {
 			return err
 		}
 	}
@@ -90,7 +69,7 @@ func PackageRelease(cfg ReleaseConfig) error {
 	if !cfg.SkipManifest {
 		manifestPath := filepath.Join(cfg.ReleaseDir, "manifest.json")
 		util.Logf("Write manifest -> %s", manifestPath)
-		if err := WriteManifest(manifestPath, taxdumpDir, markerDir, cfg.Snapshot, cfg.Force); err != nil {
+		if err := WriteManifest(manifestPath, cfg.TaxdumpDir, cfg.MarkerDir, cfg.Snapshot, cfg.Force); err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
 	}
@@ -104,19 +83,50 @@ func PackageRelease(cfg ReleaseConfig) error {
 	}
 
 	if cfg.MoveInputs {
-		if removeTaxonkitPlain && taxonkitRelease != "" {
-			if err := os.Remove(taxonkitRelease); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove taxonkit input: %w", err)
+		if taxonkitIsGz {
+			taxonkitRelease := packageTaxonkitPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot)
+			if err := movePath(cfg.TaxonkitOut, taxonkitRelease, cfg.Force); err != nil {
+				return fmt.Errorf("move taxonkit input: %w", err)
 			}
+		} else if err := os.Remove(cfg.TaxonkitOut); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove taxonkit input: %w", err)
 		}
-		if err := os.RemoveAll(taxdumpDir); err != nil && !os.IsNotExist(err) {
+		if err := os.RemoveAll(cfg.TaxdumpDir); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove taxdump dir: %w", err)
 		}
-		if err := os.RemoveAll(markerDir); err != nil && !os.IsNotExist(err) {
+		if err := os.RemoveAll(cfg.MarkerDir); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove marker dir: %w", err)
 		}
 	}
 
+	return nil
+}
+
+func checkPackageInputs(cfg ReleaseConfig) error {
+	for _, name := range []string{"nodes.dmp", "names.dmp", "taxid.map"} {
+		path := filepath.Join(cfg.TaxdumpDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("missing taxdump input: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("taxdump input is not a regular file: %s", path)
+		}
+	}
+	markerFiles, err := listMarkerFiles(cfg.MarkerDir)
+	if err != nil {
+		return fmt.Errorf("list marker inputs: %w", err)
+	}
+	if len(markerFiles) == 0 {
+		return fmt.Errorf("no marker FASTA files found in %s", cfg.MarkerDir)
+	}
+	info, err := os.Stat(cfg.TaxonkitOut)
+	if err != nil {
+		return fmt.Errorf("missing taxonomy input: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("taxonomy input is not a regular file: %s", cfg.TaxonkitOut)
+	}
 	return nil
 }
 
@@ -151,14 +161,6 @@ func checkPackageOutputs(cfg ReleaseConfig) error {
 		}
 	}
 	return nil
-}
-
-func moveDirInto(srcDir, releaseDir string, force bool) (string, error) {
-	dest := filepath.Join(releaseDir, filepath.Base(srcDir))
-	if err := movePath(srcDir, dest, force); err != nil {
-		return "", err
-	}
-	return dest, nil
 }
 
 func movePath(src, dest string, force bool) error {

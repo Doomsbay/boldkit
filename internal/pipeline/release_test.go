@@ -136,6 +136,77 @@ func TestPackageReleaseKeepsGzipTaxonomyAlreadyAtDestination(t *testing.T) {
 	assertPackageGzip(t, dest, "species\tprocessid\nCanis lupus\tP1\n")
 }
 
+func TestPackageReleaseRejectsMissingInputsBeforeAnyWork(t *testing.T) {
+	cfg := newPackageFixture(t, false)
+	if err := os.Remove(filepath.Join(cfg.TaxdumpDir, "names.dmp")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := PackageRelease(cfg)
+	if err == nil || !strings.Contains(err.Error(), "names.dmp") {
+		t.Fatalf("expected missing-input error identifying names.dmp, got %v", err)
+	}
+	if _, err := os.Stat(cfg.ReleaseDir); !os.IsNotExist(err) {
+		t.Fatalf("release dir created before input check: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(cfg.TaxdumpDir, "nodes.dmp"),
+		filepath.Join(cfg.TaxdumpDir, "taxid.map"),
+		filepath.Join(cfg.MarkerDir, "COI-5P.fasta"),
+		cfg.TaxonkitOut,
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("input disturbed by rejected run: %s: %v", path, err)
+		}
+	}
+}
+
+func TestPackageReleasePartWayFailureKeepsInputsForRerun(t *testing.T) {
+	cfg := newPackageFixture(t, false)
+	poison := filepath.Join(cfg.MarkerDir, "dangling")
+	if err := os.Symlink(filepath.Join(cfg.TaxdumpDir, "missing"), poison); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err := PackageRelease(cfg)
+	if err == nil {
+		t.Fatal("expected marker archive failure")
+	}
+	for _, path := range []string{
+		filepath.Join(cfg.TaxdumpDir, "nodes.dmp"),
+		filepath.Join(cfg.TaxdumpDir, "names.dmp"),
+		filepath.Join(cfg.TaxdumpDir, "taxid.map"),
+		filepath.Join(cfg.MarkerDir, "COI-5P.fasta"),
+		cfg.TaxonkitOut,
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("input moved before packaging finished: %s: %v", path, err)
+		}
+	}
+	entries, err := os.ReadDir(cfg.ReleaseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(packageTaxdumpArchivePath(cfg.TaxdumpDir, cfg.ReleaseDir, cfg.Snapshot)) {
+		t.Fatalf("unexpected partial release contents: %v", entries)
+	}
+
+	if err := os.Remove(poison); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Force = true
+	if err := PackageRelease(cfg); err != nil {
+		t.Fatalf("rerun after failure: %v", err)
+	}
+	assertArchiveMember(t, packageMarkerPath(cfg.MarkerDir, cfg.ReleaseDir, cfg.Snapshot), "markers/COI-5P.fasta", ">P1\nACGT\n")
+	assertPackageGzip(t, packageTaxonkitGzipPath(cfg.TaxonkitOut, cfg.ReleaseDir, cfg.Snapshot), "species\tprocessid\nCanis lupus\tP1\n")
+	for _, path := range []string{cfg.TaxdumpDir, cfg.MarkerDir, cfg.TaxonkitOut} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected input consumed by successful rerun: %s, %v", path, err)
+		}
+	}
+}
+
 func newPackageFixture(t *testing.T, compressed bool) ReleaseConfig {
 	t.Helper()
 	dir := t.TempDir()
