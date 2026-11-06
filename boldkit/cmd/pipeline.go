@@ -77,6 +77,7 @@ func runPipeline(args []string) {
 		SkipManifest:  *skipManifest,
 		SkipChecksums: *skipChecksums,
 		Snapshot:      snap,
+		Version:       appVersion,
 		Extract:       extractCfg,
 		Selected:      markers.ParseSelection(*markersFilter),
 	}); err != nil {

@@ -32,6 +32,7 @@ func runPackage(args []string) {
 		TaxonkitOut:   *taxonkitOut,
 		ReleaseDir:    *releaseDir,
 		Snapshot:      snap,
+		Version:       appVersion,
 		Force:         *force,
 		SkipManifest:  *skipManifest,
 		SkipChecksums: *skipChecksums,

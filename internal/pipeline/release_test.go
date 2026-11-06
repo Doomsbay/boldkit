@@ -3,11 +3,14 @@ package pipeline
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 )
 
 func TestPackageReleaseRejectsExistingOutputsBeforeMovingInputs(t *testing.T) {
@@ -203,6 +206,94 @@ func TestPackageReleasePartWayFailureKeepsInputsForRerun(t *testing.T) {
 	for _, path := range []string{cfg.TaxdumpDir, cfg.MarkerDir, cfg.TaxonkitOut} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("expected input consumed by successful rerun: %s, %v", path, err)
+		}
+	}
+}
+
+func TestPackageReleaseMetadataNamesAndChecksums(t *testing.T) {
+	cfg := newPackageFixture(t, true)
+	if err := os.MkdirAll(cfg.ReleaseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.ReleaseDir, "stale.fixture.tar.gz"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := PackageRelease(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]bool{
+		"taxdump.fixture.tar.gz":  false,
+		"markers.fixture.tar.gz":  false,
+		"taxonomy.fixture.tsv.gz": false,
+		"manifest.json":           false,
+		"SHA256SUMS.txt":          false,
+		"stale.fixture.tar.gz":    false,
+	}
+	entries, err := os.ReadDir(cfg.ReleaseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		seen[entry.Name()] = struct{}{}
+		if _, ok := want[entry.Name()]; !ok {
+			t.Errorf("unexpected release file: %s", entry.Name())
+		}
+	}
+	for name := range want {
+		if _, ok := seen[name]; !ok {
+			t.Errorf("missing release file: %s", name)
+		}
+	}
+
+	var manifest struct {
+		SnapshotID string `json:"snapshot_id"`
+		CommitHash string `json:"commit_hash"`
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(cfg.ReleaseDir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	if manifest.SnapshotID != cfg.Snapshot {
+		t.Errorf("manifest snapshot_id = %q, want %q", manifest.SnapshotID, cfg.Snapshot)
+	}
+	if manifest.CommitHash == "" {
+		t.Error("manifest commit_hash is empty")
+	}
+
+	sumBytes, err := os.ReadFile(filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(sumBytes)), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 checksum entries, got %d:\n%s", len(lines), sumBytes)
+	}
+	listed := make(map[string]string)
+	for _, line := range lines {
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			t.Fatalf("malformed checksum line: %q", line)
+		}
+		listed[parts[1]] = parts[0]
+	}
+	if _, ok := listed["stale.fixture.tar.gz"]; ok {
+		t.Error("stale archive listed in SHA256SUMS")
+	}
+	if _, ok := listed["manifest.json"]; !ok {
+		t.Error("manifest.json missing from SHA256SUMS")
+	}
+	for name, sum := range listed {
+		got, err := boldio.SHA256File(filepath.Join(cfg.ReleaseDir, name))
+		if err != nil {
+			t.Fatalf("checksum %s: %v", name, err)
+		}
+		if got != sum {
+			t.Errorf("checksum mismatch for %s: listed %s, actual %s", name, sum, got)
 		}
 	}
 }

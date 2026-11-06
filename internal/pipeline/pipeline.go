@@ -3,11 +3,9 @@ package pipeline
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/Doomsbay/BoldKit/internal/extract"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
@@ -33,6 +31,7 @@ type Config struct {
 	Snapshot      string
 	Extract       extract.CurationConfig
 	Selected      [][]byte
+	Version       string
 }
 
 func Run(cfg Config) error {
@@ -74,6 +73,7 @@ func Run(cfg Config) error {
 		TaxonkitOut:   cfg.TaxonkitOut,
 		ReleaseDir:    cfg.ReleaseDir,
 		Snapshot:      cfg.Snapshot,
+		Version:       cfg.Version,
 		Force:         cfg.Force,
 		SkipManifest:  cfg.SkipManifest,
 		SkipChecksums: cfg.SkipChecksums,
@@ -106,14 +106,4 @@ func taxonkitCreate(bin, input, outputDir string, force bool) error {
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func gitCommitHash() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Stderr = io.Discard
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }

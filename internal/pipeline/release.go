@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"runtime/debug"
 	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
@@ -21,6 +21,7 @@ type ReleaseConfig struct {
 	TaxonkitOut   string
 	ReleaseDir    string
 	Snapshot      string
+	Version       string
 	Force         bool
 	SkipManifest  bool
 	SkipChecksums bool
@@ -66,18 +67,28 @@ func PackageRelease(cfg ReleaseConfig) error {
 		}
 	}
 
+	taxonkitArtifact := ReleaseFile{Path: taxonkitGz, Name: filepath.Base(taxonkitGz)}
+	if taxonkitIsGz && cfg.MoveInputs {
+		taxonkitArtifact.Path = cfg.TaxonkitOut
+	}
+	releaseFiles := []ReleaseFile{
+		{Path: taxdumpArchive, Name: filepath.Base(taxdumpArchive)},
+		{Path: markerZip, Name: filepath.Base(markerZip)},
+		taxonkitArtifact,
+	}
 	if !cfg.SkipManifest {
 		manifestPath := filepath.Join(cfg.ReleaseDir, "manifest.json")
 		util.Logf("Write manifest -> %s", manifestPath)
-		if err := WriteManifest(manifestPath, cfg.TaxdumpDir, cfg.MarkerDir, cfg.Snapshot, cfg.Force); err != nil {
+		if err := WriteManifest(manifestPath, cfg.TaxdumpDir, cfg.MarkerDir, cfg.Snapshot, cfg.Version, cfg.Force); err != nil {
 			return fmt.Errorf("manifest: %w", err)
 		}
+		releaseFiles = append(releaseFiles, ReleaseFile{Path: manifestPath, Name: "manifest.json"})
 	}
 
 	if !cfg.SkipChecksums {
 		sumPath := filepath.Join(cfg.ReleaseDir, "SHA256SUMS.txt")
 		util.Logf("Write checksums -> %s", sumPath)
-		if err := WriteChecksums(cfg.ReleaseDir, sumPath, cfg.Force); err != nil {
+		if err := WriteChecksums(sumPath, releaseFiles, cfg.Force); err != nil {
 			return fmt.Errorf("checksums: %w", err)
 		}
 	}
@@ -218,26 +229,27 @@ func packageTaxdumpArchivePath(taxdumpDir, releaseDir, snapshot string) string {
 }
 
 func packageTaxonkitPath(taxonkitOut, releaseDir, snapshot string) string {
-	base := filepath.Base(taxonkitOut)
-	if snapshot != "" {
-		ext := filepath.Ext(base)
-		name := strings.TrimSuffix(base, ext)
-		base = name + "." + util.SafeTag(snapshot) + ext
-	}
+	base := snapshotTaggedName(filepath.Base(taxonkitOut), snapshot)
 	return filepath.Join(releaseDir, base)
 }
 
 func packageTaxonkitGzipPath(taxonkitOut, releaseDir, snapshot string) string {
-	base := filepath.Base(taxonkitOut)
-	if snapshot != "" {
-		ext := filepath.Ext(base)
-		name := strings.TrimSuffix(base, ext)
-		base = name + "." + util.SafeTag(snapshot) + ext
-	}
+	base := snapshotTaggedName(filepath.Base(taxonkitOut), snapshot)
 	if !strings.HasSuffix(base, ".gz") {
 		base += ".gz"
 	}
 	return filepath.Join(releaseDir, base)
+}
+
+func snapshotTaggedName(base, snapshot string) string {
+	if snapshot == "" {
+		return base
+	}
+	ext := filepath.Ext(base)
+	if strings.HasSuffix(base, ".tsv.gz") {
+		ext = ".tsv.gz"
+	}
+	return strings.TrimSuffix(base, ext) + "." + util.SafeTag(snapshot) + ext
 }
 
 func packageTaxonkitGzip(src, dest string, force bool) error {
@@ -286,53 +298,39 @@ func packageTaxonkitGzip(src, dest string, force bool) error {
 	return nil
 }
 
-func WriteChecksums(releaseDir, outputFile string, force bool) error {
+type ReleaseFile struct {
+	Path string
+	Name string
+}
+
+func WriteChecksums(outputFile string, files []ReleaseFile, force bool) error {
 	if boldio.FileExists(outputFile) && !force {
 		util.Logf("checksums exist, skipping (use --force to overwrite): %s", outputFile)
 		return nil
 	}
 
-	patterns := []string{"*.zip", "*.tar.gz", "*.tsv.gz"}
-	seen := make(map[string]struct{})
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(filepath.Join(releaseDir, pattern))
-		if err != nil {
-			return err
-		}
-		for _, match := range matches {
-			seen[match] = struct{}{}
-		}
-	}
-	if len(seen) == 0 {
-		return fmt.Errorf("no packaged files found in %s", releaseDir)
-	}
-	files := make([]string, 0, len(seen))
-	for f := range seen {
-		files = append(files, f)
-	}
-	sort.Strings(files)
-
-	out, err := os.Create(outputFile)
+	out, err := boldio.CreateAtomic(outputFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("create checksums: %w", err)
 	}
-	defer func() {
-		_ = out.Close()
-	}()
-
 	for _, f := range files {
-		sum, err := boldio.SHA256File(f)
+		sum, err := boldio.SHA256File(f.Path)
 		if err != nil {
+			out.Abort()
 			return err
 		}
-		if _, err := fmt.Fprintf(out, "%s  %s\n", sum, filepath.Base(f)); err != nil {
-			return err
+		if _, err := fmt.Fprintf(out, "%s  %s\n", sum, f.Name); err != nil {
+			out.Abort()
+			return fmt.Errorf("write checksums: %w", err)
 		}
+	}
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish checksums: %w", err)
 	}
 	return nil
 }
 
-func WriteManifest(path, taxdumpDir, markerDir, snapshot string, force bool) error {
+func WriteManifest(path, taxdumpDir, markerDir, snapshot, version string, force bool) error {
 	if boldio.FileExists(path) && !force {
 		util.Logf("manifest exists, skipping (use --force to overwrite): %s", path)
 		return nil
@@ -340,11 +338,6 @@ func WriteManifest(path, taxdumpDir, markerDir, snapshot string, force bool) err
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
-	}
-
-	commit := "unknown"
-	if c, err := gitCommitHash(); err == nil && c != "" {
-		commit = c
 	}
 
 	nodes, err := boldio.CountLines(filepath.Join(taxdumpDir, "nodes.dmp"))
@@ -381,7 +374,7 @@ func WriteManifest(path, taxdumpDir, markerDir, snapshot string, force bool) err
 		} `json:"counts"`
 	}{
 		SnapshotID: snapshot,
-		CommitHash: commit,
+		CommitHash: releaseCommitHash(version),
 	}
 	manifest.Counts.Nodes = nodes
 	manifest.Counts.Names = names
@@ -393,7 +386,35 @@ func WriteManifest(path, taxdumpDir, markerDir, snapshot string, force bool) err
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	out, err := boldio.CreateAtomic(path)
+	if err != nil {
+		return fmt.Errorf("create manifest: %w", err)
+	}
+	if _, err := out.Write(append(data, '\n')); err != nil {
+		out.Abort()
+		return fmt.Errorf("write manifest: %w", err)
+	}
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish manifest: %w", err)
+	}
+	return nil
+}
+
+func releaseCommitHash(version string) string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && setting.Value != "" {
+				return setting.Value
+			}
+		}
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	if version != "" && version != "dev" {
+		return version
+	}
+	return "unknown"
 }
 
 func listMarkerFiles(markerDir string) ([]string, error) {
