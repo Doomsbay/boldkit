@@ -107,7 +107,7 @@ func SplitOne(cfg Config) error {
 		if err != nil {
 			return err
 		}
-		conflicts, err = detectSequenceLabelConflicts(cfg.Input, labels, invalidIDs, cfg.QC.GapPolicy)
+		conflicts, err = detectSequenceLabelConflicts(cfg.Input, labels, invalidIDs, cfg.QC.GapPolicy, cfg.QC.DedupeIDs)
 		if err != nil {
 			return err
 		}

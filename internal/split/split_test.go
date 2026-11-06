@@ -132,6 +132,75 @@ func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitReport, s
 	return report, outDir
 }
 
+func TestSplitConflictCheckIgnoresDuplicateIDQCWouldDrop(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	fasta := ">P1\nACGTACGTAC\n>P1\nTTTTGGCCAA\n>P2\nTTTTGGCCAA\n>P3\nAAAAACCCCC\n>P4\nGGGGGTTTTT\n"
+	if err := os.WriteFile(input, []byte(fasta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxonkit := filepath.Join(dir, "taxonkit_input.tsv")
+	tsv := "processid\tspecies\nP1\tAlpha\nP2\tBeta\nP3\tBeta\nP4\tBeta\n"
+	if err := os.WriteFile(taxonkit, []byte(tsv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxdumpDir := filepath.Join(dir, "taxdump")
+	writeSplitTaxdump(t, taxdumpDir, []string{"P1", "P2", "P3", "P4"})
+
+	strategy := DefaultStrategy()
+	strategy.MinSeenRecords = 1
+	strategy.MinSeenBarcodes = 1
+	run := func(dedupeIDs bool) splitReport {
+		t.Helper()
+		outDir := filepath.Join(dir, map[bool]string{true: "libs-dedup", false: "libs-nodedup"}[dedupeIDs])
+		if err := SplitOne(Config{
+			Input:         input,
+			OutDir:        outDir,
+			TaxonkitInput: taxonkit,
+			Classifiers:   []string{"blast"},
+			TaxdumpDir:    taxdumpDir,
+			RunQC:         true,
+			Strategy:      strategy,
+			QC: qc.Config{
+				GapPolicy:  qc.GapPolicyDrop,
+				DedupeSeqs: true,
+				DedupeIDs:  dedupeIDs,
+			},
+		}); err != nil {
+			t.Fatalf("SplitOne (dedupe-ids=%v): %v", dedupeIDs, err)
+		}
+		data, err := os.ReadFile(filepath.Join(outDir, "split_report.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report splitReport
+		if err := json.Unmarshal(data, &report); err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+
+	if report := run(true); report.Stats.ConflictGroups != 0 || report.Stats.ConflictRecords != 0 {
+		t.Fatalf("duplicate ID dropped by QC must not create a conflict: %+v", report.Stats)
+	}
+	pretrain, err := os.ReadFile(filepath.Join(dir, "libs-dedup", bucketPretrain+".fasta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(pretrain), ">P2") {
+		t.Fatalf("P2 moved to pretrain by a phantom conflict:\n%s", pretrain)
+	}
+
+	labels := map[string]string{"P1": "Alpha", "P2": "Beta", "P3": "Beta", "P4": "Beta"}
+	conflicts, err := detectSequenceLabelConflicts(input, labels, nil, qc.GapPolicyDrop, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflicts.groups != 1 {
+		t.Fatalf("genuine conflicts must still be detected without skipping: %+v", conflicts)
+	}
+}
+
 func TestSplitRunQCAcceptsDuplicateIDsWithDedupe(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.fasta")
