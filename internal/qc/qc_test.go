@@ -9,6 +9,35 @@ import (
 	"testing"
 )
 
+func TestQCFailedRerunKeepsPreviousOutput(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nACGT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "clean.fasta")
+	previous := ">P1\nACGT\n"
+	if err := os.WriteFile(output, []byte(previous), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/full", output+".tmp"); err != nil {
+		t.Skipf("/dev/full unavailable: %v", err)
+	}
+
+	cfg := Config{MinLen: 4, OutputPath: output}
+	if err := RunQC(input, cfg); err == nil {
+		t.Fatal("expected QC output publish failure")
+	}
+
+	got, err := os.ReadFile(output)
+	if err != nil || string(got) != previous {
+		t.Fatalf("previous output lost by failed rerun: %q, %v", got, err)
+	}
+	if _, err := os.Lstat(output + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind: %v", err)
+	}
+}
+
 func TestQCDuplicateIDNotReservedByRejectedRecord(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.fasta")

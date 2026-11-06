@@ -3,7 +3,6 @@ package split
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/Doomsbay/BoldKit/internal/format"
@@ -300,18 +299,18 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 }
 
 func writeSplitReport(path string, report splitReport) error {
-	f, err := os.Create(path)
+	out, err := boldio.CreateAtomic(path)
 	if err != nil {
 		return fmt.Errorf("create split report: %w", err)
 	}
-	enc := json.NewEncoder(f)
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(report); err != nil {
-		_ = f.Close()
+		out.Abort()
 		return fmt.Errorf("write split report: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close split report: %w", err)
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish split report: %w", err)
 	}
 	return nil
 }

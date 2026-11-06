@@ -99,7 +99,7 @@ func RunQC(input string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
-	out, err := os.Create(cfg.OutputPath)
+	out, err := boldio.CreateAtomic(cfg.OutputPath)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
@@ -107,7 +107,7 @@ func RunQC(input string, cfg Config) error {
 	committed := false
 	defer func() {
 		if !committed {
-			_ = out.Close()
+			out.Abort()
 		}
 	}()
 
@@ -235,8 +235,8 @@ func RunQC(input string, cfg Config) error {
 	if err := writer.Flush(); err != nil {
 		return fmt.Errorf("flush output: %w", err)
 	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("close output: %w", err)
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish output: %w", err)
 	}
 	committed = true
 
