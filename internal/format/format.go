@@ -62,7 +62,7 @@ type formatStats struct {
 
 type writerHandle struct {
 	w *bufio.Writer
-	f *os.File
+	a *boldio.AtomicFile
 }
 
 type formatWriters struct {
@@ -443,11 +443,11 @@ func openFormatWriters(outDir string, classifiers []string) (*formatWriters, err
 
 	openFasta := func(name string) (writerHandle, error) {
 		path := filepath.Join(outDir, name)
-		f, err := os.Create(path)
+		af, err := boldio.CreateAtomic(path)
 		if err != nil {
-			return writerHandle{}, fmt.Errorf("create %s: %w", path, err)
+			return writerHandle{}, err
 		}
-		return writerHandle{w: bufio.NewWriterSize(f, writerBufferSize), f: f}, nil
+		return writerHandle{w: bufio.NewWriterSize(af, writerBufferSize), a: af}, nil
 	}
 
 	if _, ok := needs["blast"]; ok {
@@ -545,10 +545,13 @@ func commitFormatWriters(w *formatWriters) error {
 		if err := h.h.w.Flush(); err != nil {
 			return fmt.Errorf("flush %s: %w", h.name, err)
 		}
-		if h.h.f != nil {
-			if err := h.h.f.Close(); err != nil {
-				return fmt.Errorf("close %s: %w", h.name, err)
-			}
+	}
+	for _, h := range handles {
+		if h.h.a == nil {
+			continue
+		}
+		if err := h.h.a.Commit(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -556,10 +559,10 @@ func commitFormatWriters(w *formatWriters) error {
 
 func discardFormatWriters(w *formatWriters) {
 	for _, h := range []writerHandle{w.blastFasta, w.blastMap, w.krakenFasta, w.sintaxFasta, w.rdpTrainFasta, w.rdpTaxonomy, w.idtaxaFasta, w.idtaxaLineage, w.protaxFasta, w.protaxMap, w.protaxCSV} {
-		if h.f == nil {
+		if h.a == nil {
 			continue
 		}
-		_ = h.f.Close()
+		h.a.Abort()
 	}
 }
 

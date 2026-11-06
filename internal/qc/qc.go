@@ -410,18 +410,18 @@ func WriteReport(path string, stats Stats) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create report dir: %w", err)
 	}
-	f, err := os.Create(path)
+	af, err := boldio.CreateAtomic(path)
 	if err != nil {
 		return fmt.Errorf("create report: %w", err)
 	}
-	enc := json.NewEncoder(f)
+	enc := json.NewEncoder(af)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(stats); err != nil {
-		_ = f.Close()
+		af.Abort()
 		return fmt.Errorf("write report: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close report: %w", err)
+	if err := af.Commit(); err != nil {
+		return fmt.Errorf("finalize report: %w", err)
 	}
 	return nil
 }

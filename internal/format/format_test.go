@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -46,10 +47,7 @@ func TestValidateClassifiersAcceptsCaseVariants(t *testing.T) {
 	}
 }
 
-func TestOpenFormatWritersClosesFilesOnSetupError(t *testing.T) {
-	if _, err := os.ReadDir("/proc/self/fd"); err != nil {
-		t.Skip("file descriptor inspection unavailable")
-	}
+func TestOpenFormatWritersSetupFailureKeepsDirectoryClean(t *testing.T) {
 	for _, tc := range []struct {
 		classifier string
 		fasta      string
@@ -62,20 +60,32 @@ func TestOpenFormatWritersClosesFilesOnSetupError(t *testing.T) {
 	} {
 		t.Run(tc.classifier, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.Mkdir(filepath.Join(dir, tc.mapping), 0o755); err != nil {
+			if err := os.Mkdir(filepath.Join(dir, tc.mapping+".tmp"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := openFormatWriters(dir, []string{tc.classifier}); err == nil {
 				t.Fatal("expected setup error")
 			}
-			entries, err := os.ReadDir("/proc/self/fd")
+			entries, err := os.ReadDir(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, entry := range entries {
+				if entry.Name() == tc.mapping+".tmp" {
+					continue
+				}
+				if strings.HasSuffix(entry.Name(), ".tmp") {
+					t.Fatalf("temp file left behind after setup failure: %s", entry.Name())
+				}
+			}
+			fds, err := os.ReadDir("/proc/self/fd")
+			if err != nil {
+				t.Skip("file descriptor inspection unavailable")
+			}
+			for _, entry := range fds {
 				target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
-				if err == nil && target == filepath.Join(dir, tc.fasta) {
-					t.Fatalf("FASTA file left open after setup failure: %s", target)
+				if err == nil && strings.HasPrefix(target, dir+string(os.PathSeparator)) {
+					t.Fatalf("file left open after setup failure: %s", target)
 				}
 			}
 		})
@@ -83,18 +93,91 @@ func TestOpenFormatWritersClosesFilesOnSetupError(t *testing.T) {
 }
 
 func TestCommitFormatWritersPropagatesFlushError(t *testing.T) {
-	f, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
-	if err != nil {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "blast.fasta")
+	if err := os.Symlink("/dev/full", dest+".tmp"); err != nil {
 		t.Skipf("/dev/full unavailable: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	buf := bufio.NewWriterSize(f, 64)
+	af, err := boldio.CreateAtomic(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := bufio.NewWriterSize(af, 64)
 	if _, err := buf.WriteString(">P1\nACGT\n"); err != nil {
 		t.Fatal(err)
 	}
-	writers := &formatWriters{blastFasta: writerHandle{w: buf, f: f}}
+	writers := &formatWriters{blastFasta: writerHandle{w: buf, a: af}}
 	if err := commitFormatWriters(writers); err == nil || !strings.Contains(err.Error(), "flush blast.fasta") {
 		t.Fatalf("expected flush error, got %v", err)
+	}
+	af.Abort()
+}
+
+func TestFormatFastaFailedRerunKeepsEarlierOutputs(t *testing.T) {
+	dir := t.TempDir()
+	taxdumpDir := filepath.Join(dir, "taxdump")
+	writeTaxdumpFixture(t, taxdumpDir, protaxHomonymTaxa, map[string]int{"P1": 7})
+	input := filepath.Join(dir, "input.fasta")
+	if err := os.WriteFile(input, []byte(">P1\nACGTAA\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "formatted")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := ">P1\nACGTAA\n"
+	if err := os.WriteFile(filepath.Join(outDir, "blast.fasta"), []byte(previous), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "blast_seqid2taxid.map"), []byte("P1\t7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/full", filepath.Join(outDir, "sintax.fasta.tmp")); err != nil {
+		t.Skipf("/dev/full unavailable: %v", err)
+	}
+
+	cfg := FormatConfig{
+		Classifiers:  []string{"blast", "sintax"},
+		RequireRanks: util.SplitList("kingdom,phylum,class,order,family,genus,species"),
+		Input:        input,
+		OutDir:       outDir,
+		TaxdumpDir:   taxdumpDir,
+	}
+	if err := FormatFasta(cfg); err == nil {
+		t.Fatal("expected failure when an output cannot be flushed")
+	}
+
+	got, err := os.ReadFile(filepath.Join(outDir, "blast.fasta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != previous {
+		t.Errorf("blast.fasta replaced on failed rerun: %q", got)
+	}
+	gotMap, err := os.ReadFile(filepath.Join(outDir, "blast_seqid2taxid.map"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotMap) != "P1\t7\n" {
+		t.Errorf("blast map replaced on failed rerun: %q", gotMap)
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") && entry.Name() != "sintax.fasta.tmp" {
+			t.Errorf("temp file left behind after failed rerun: %s", entry.Name())
+		}
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().IsRegular() && info.Size() == 0 {
+			t.Errorf("zero-byte output left behind: %s", entry.Name())
+		}
 	}
 }
 
