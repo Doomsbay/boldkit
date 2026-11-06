@@ -137,7 +137,7 @@ func SplitOne(cfg Config) error {
 	if strategy.isZero() {
 		strategy = DefaultStrategy()
 	}
-	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs, conflicts.hashes, strategy)
+	plan, stats, err := buildSplitPlan(splitInput, labels, invalidIDs, conflicts.hashes, strategy, !cfg.RunQC)
 	if err != nil {
 		return err
 	}

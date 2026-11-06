@@ -2,7 +2,6 @@ package split
 
 import (
 	"bufio"
-	"crypto/md5"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,11 +74,12 @@ func writeSplitFastas(input, outDir string, plan splitPlan, labels map[string]st
 
 	counts := make(map[string]int)
 	seenTrainIDs := make(map[string]struct{})
+	hasher := barcodeHasher{canonical: plan.canonical}
 	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		bucket := bucketPretrain
 		if _, bad := plan.invalidIDs[rec.ID]; !bad {
 			if _, ok := labels[rec.ID]; ok {
-				hash := md5.Sum(rec.Seq)
+				hash := hasher.hash(rec.Seq)
 				if _, conflict := plan.conflicted[hash]; !conflict {
 					if mapped, ok := plan.seqBucket[hash]; ok {
 						bucket = mapped

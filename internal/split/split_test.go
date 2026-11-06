@@ -417,7 +417,7 @@ func TestBuildSplitPlanDetectsConflictsWithoutQC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy())
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy(), false)
 	if err != nil {
 		t.Fatalf("buildSplitPlan: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 
 	raiseSeenBar := DefaultStrategy()
 	raiseSeenBar.MinSeenRecords = 20
-	_, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, raiseSeenBar)
+	_, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, raiseSeenBar, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 
 	noHeldout := DefaultStrategy()
 	noHeldout.HeldoutFrac = 0
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, noHeldout)
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, noHeldout, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 
 	allHeldout := DefaultStrategy()
 	allHeldout.HeldoutFrac = 1
-	plan, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, allHeldout)
+	plan, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, allHeldout, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 
 	tightTest := DefaultStrategy()
 	tightTest.MaxTestTargetPerClass = 1
-	plan, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, tightTest)
+	plan, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, tightTest, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,8 +514,69 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 
 	outOfRange := DefaultStrategy()
 	outOfRange.SeenValTarget = 1.5
-	if _, _, err := buildSplitPlan(input, labels, invalidIDs, nil, outOfRange); err == nil {
+	if _, _, err := buildSplitPlan(input, labels, invalidIDs, nil, outOfRange, false); err == nil {
 		t.Fatal("expected out-of-range fraction to fail")
+	}
+}
+
+func TestSplitNoQCGroupsCaseAndGapVariants(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	fasta := ">P1\nACGTACGTAC\n>P2\nacgtacgtac\n" +
+		">P3\nTTTTGGCCAA\n>P4\nTTTT-GGCCAA\n" +
+		">P5\nAAAAACCCCC\n>P6\naaaaaccccc\n" +
+		">P7\nGGGGGTTTTT\n>P8\nGGGGG-TTTTT\n"
+	if err := os.WriteFile(input, []byte(fasta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxonkit := filepath.Join(dir, "taxonkit_input.tsv")
+	var tsv strings.Builder
+	tsv.WriteString("processid\tspecies\n")
+	for i := 1; i <= 8; i++ {
+		fmt.Fprintf(&tsv, "P%d\tAlpha\n", i)
+	}
+	if err := os.WriteFile(taxonkit, []byte(tsv.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxdumpDir := filepath.Join(dir, "taxdump")
+	writeSplitTaxdump(t, taxdumpDir, []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"})
+
+	strategy := DefaultStrategy()
+	strategy.MinSeenRecords = 1
+	strategy.MinSeenBarcodes = 1
+	outDir := filepath.Join(dir, "libraries")
+	if err := SplitOne(Config{
+		Input:         input,
+		OutDir:        outDir,
+		TaxonkitInput: taxonkit,
+		Classifiers:   []string{"blast"},
+		TaxdumpDir:    taxdumpDir,
+		RunQC:         false,
+		Strategy:      strategy,
+	}); err != nil {
+		t.Fatalf("SplitOne: %v", err)
+	}
+
+	bucketOf := make(map[string]string)
+	for _, bucket := range []string{bucketSeenTrain, bucketSeenVal, bucketSeenTest, bucketUnseenTest, bucketUnseenVal, bucketUnseenKeys, bucketHeldout, bucketPretrain} {
+		data, err := os.ReadFile(filepath.Join(outDir, bucket+".fasta"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, ">") {
+				bucketOf[strings.TrimPrefix(line, ">")] = bucket
+			}
+		}
+	}
+	for _, pair := range [][2]string{{"P1", "P2"}, {"P3", "P4"}, {"P5", "P6"}, {"P7", "P8"}} {
+		a, b := bucketOf[pair[0]], bucketOf[pair[1]]
+		if a == "" || b == "" {
+			t.Fatalf("missing bucket assignment for %v: %v", pair, bucketOf)
+		}
+		if a != b {
+			t.Errorf("barcode variants %v split across %s and %s", pair, a, b)
+		}
 	}
 }
 
@@ -590,7 +651,7 @@ func TestSplitIncludeSpeciesForcesSeenWithTrainingRecord(t *testing.T) {
 	strategy := DefaultStrategy()
 	strategy.IncludeSpecies = []string{"Alpha"}
 	strategy.HoldoutSpecies = []string{"Alpha"}
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy)
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +680,7 @@ func TestSplitIncludeSpeciesGuaranteesTrainingWithTwoGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy())
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +695,7 @@ func TestSplitIncludeSpeciesGuaranteesTrainingWithTwoGroups(t *testing.T) {
 
 	strategy := DefaultStrategy()
 	strategy.IncludeSpecies = []string{"Delta"}
-	forcedPlan, forcedStats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy)
+	forcedPlan, forcedStats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,7 +728,7 @@ func TestSplitHoldoutSpeciesForcedToHeldout(t *testing.T) {
 
 	strategy := DefaultStrategy()
 	strategy.HoldoutSpecies = []string{"Gamma", "NoSuchSpecies"}
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy)
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, strategy, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -700,7 +761,7 @@ func TestBuildSplitPlanDefaultStrategyGoldenBuckets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy())
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, DefaultStrategy(), false)
 	if err != nil {
 		t.Fatalf("buildSplitPlan: %v", err)
 	}

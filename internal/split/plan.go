@@ -76,6 +76,7 @@ type splitPlan struct {
 	seqBucket  map[[16]byte]string
 	conflicted map[[16]byte]struct{}
 	invalidIDs map[string]struct{}
+	canonical  bool
 }
 
 type splitTarget struct {
@@ -146,7 +147,7 @@ func detectSequenceLabelConflicts(input string, labels map[string]string, invali
 	return report, nil
 }
 
-func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}, preConflicted map[[16]byte]struct{}, strategy SplitStrategy) (splitPlan, splitStats, error) {
+func buildSplitPlan(input string, labels map[string]string, invalidIDs map[string]struct{}, preConflicted map[[16]byte]struct{}, strategy SplitStrategy, canonical bool) (splitPlan, splitStats, error) {
 	if err := strategy.validate(); err != nil {
 		return splitPlan{}, splitStats{}, err
 	}
@@ -160,6 +161,7 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 
 	barcodeGroups := make(map[[16]byte]barcodeGroup, 1<<20)
 	stats := splitStats{}
+	hasher := barcodeHasher{canonical: canonical}
 
 	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		stats.TotalRecords++
@@ -172,7 +174,7 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 			return nil
 		}
 
-		hash := md5.Sum(rec.Seq)
+		hash := hasher.hash(rec.Seq)
 		group := barcodeGroups[hash]
 		if group.count == 0 {
 			group.label = label
@@ -296,7 +298,31 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 		seqBucket:  seqBucket,
 		conflicted: conflicted,
 		invalidIDs: invalidIDs,
+		canonical:  canonical,
 	}, stats, nil
+}
+
+type barcodeHasher struct {
+	canonical bool
+	scratch   []byte
+}
+
+func (h *barcodeHasher) hash(seq []byte) [16]byte {
+	if !h.canonical {
+		return md5.Sum(seq)
+	}
+	h.scratch = h.scratch[:0]
+	for _, c := range seq {
+		switch {
+		case c == '-' || c == ' ' || c == '\t' || c == '\r' || c == '\n':
+			continue
+		case c >= 'a' && c <= 'z':
+			h.scratch = append(h.scratch, c-32)
+		default:
+			h.scratch = append(h.scratch, c)
+		}
+	}
+	return md5.Sum(h.scratch)
 }
 
 func assignUnits(seqBucket map[[16]byte]string, units []barcodeUnit, targets []splitTarget) {
