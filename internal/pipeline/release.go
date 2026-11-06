@@ -186,6 +186,7 @@ func movePath(src, dest string, force bool) error {
 	}
 	if info.IsDir() {
 		if err := boldio.CopyDir(src, dest); err != nil {
+			_ = os.RemoveAll(dest)
 			return err
 		}
 	} else {
