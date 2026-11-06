@@ -3,10 +3,11 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Doomsbay/BoldKit/internal/classify"
-	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/qc"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
@@ -103,13 +104,27 @@ func resolveMarkerInput(markerDir, marker string) (string, error) {
 	if marker == "" {
 		return "", fmt.Errorf("marker is empty")
 	}
-	gz := filepath.Join(markerDir, marker+".fasta.gz")
-	if boldio.FileExists(gz) {
-		return gz, nil
+	name := util.SanitizeMarkerBytes(nil, []byte(marker))
+	entries, err := os.ReadDir(markerDir)
+	if err != nil {
+		return "", fmt.Errorf("read marker dir: %w", err)
 	}
-	raw := filepath.Join(markerDir, marker+".fasta")
-	if boldio.FileExists(raw) {
+	raw := ""
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		filename := strings.TrimSuffix(entry.Name(), ".gz")
+		if !strings.EqualFold(filename, name+".fasta") {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".gz") {
+			return filepath.Join(markerDir, entry.Name()), nil
+		}
+		raw = filepath.Join(markerDir, entry.Name())
+	}
+	if raw != "" {
 		return raw, nil
 	}
-	return "", fmt.Errorf("marker FASTA not found (%s or %s)", gz, raw)
+	return "", fmt.Errorf("marker FASTA not found in %s (looked for %s.fasta or %s.fasta.gz)", markerDir, name, name)
 }
