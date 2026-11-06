@@ -276,24 +276,27 @@ func packageTaxonkitGzip(src, dest string, force bool) error {
 		_ = in.Close()
 	}()
 
-	out, err := os.Create(dest)
+	out, err := boldio.CreateAtomic(dest)
 	if err != nil {
 		return fmt.Errorf("create taxonkit gzip: %w", err)
 	}
-	defer func() {
-		_ = out.Close()
-	}()
 
 	gzw, err := gzip.NewWriterLevel(out, gzip.BestSpeed)
 	if err != nil {
+		out.Abort()
 		return fmt.Errorf("create gzip writer: %w", err)
 	}
 	if _, err := io.Copy(gzw, in); err != nil {
 		_ = gzw.Close()
+		out.Abort()
 		return fmt.Errorf("gzip taxonkit input: %w", err)
 	}
 	if err := gzw.Close(); err != nil {
+		out.Abort()
 		return fmt.Errorf("finalize gzip: %w", err)
+	}
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish taxonkit gzip: %w", err)
 	}
 	return nil
 }

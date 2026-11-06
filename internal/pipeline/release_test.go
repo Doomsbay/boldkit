@@ -298,6 +298,37 @@ func TestPackageReleaseMetadataNamesAndChecksums(t *testing.T) {
 	}
 }
 
+func TestPackageTaxonkitGzipFailureKeepsPreviousFile(t *testing.T) {
+	tmp := t.TempDir()
+	releaseDir := filepath.Join(tmp, "releases")
+	if err := os.MkdirAll(releaseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tmp, "taxonomy.tsv")
+	if err := os.WriteFile(src, []byte("species\tprocessid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(releaseDir, "taxonomy.fixture.tsv.gz")
+	previous := []byte("previous gzip")
+	if err := os.WriteFile(dest, previous, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/full", dest+".tmp"); err != nil {
+		t.Skipf("/dev/full unavailable: %v", err)
+	}
+
+	if err := packageTaxonkitGzip(src, dest, true); err == nil {
+		t.Fatal("expected gzip finalize failure")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != string(previous) {
+		t.Fatalf("previous gzip replaced by failed run: %q, %v", got, err)
+	}
+	if _, err := os.Lstat(dest + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind: %v", err)
+	}
+}
+
 func newPackageFixture(t *testing.T, compressed bool) ReleaseConfig {
 	t.Helper()
 	dir := t.TempDir()
