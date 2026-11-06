@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,5 +37,33 @@ func TestResolveMarkerInputMatchesSanitizedCaseInsensitive(t *testing.T) {
 	}
 	if _, err := resolveMarkerInput(dir, "ITS2"); err == nil {
 		t.Fatal("expected missing marker to fail")
+	}
+}
+
+func TestResolveMarkerInputRejectsAmbiguousSpellings(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"COI-5P.fasta.gz", "coi-5p.fasta.gz"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := resolveMarkerInput(dir, "COI-5P")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
+		!strings.Contains(err.Error(), "COI-5P.fasta.gz") || !strings.Contains(err.Error(), "coi-5p.fasta.gz") {
+		t.Fatalf("expected ambiguous-marker error naming both files, got %v", err)
+	}
+
+	mixed := filepath.Join(dir, "mixed")
+	if err := os.MkdirAll(mixed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mixed, "MATK.fasta"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mixed, "matk.fasta"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveMarkerInput(mixed, "matk"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguous-marker error across plain and gz spellings, got %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Doomsbay/BoldKit/internal/classify"
@@ -109,7 +110,7 @@ func resolveMarkerInput(markerDir, marker string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read marker dir: %w", err)
 	}
-	raw := ""
+	var gz, plain []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -119,12 +120,25 @@ func resolveMarkerInput(markerDir, marker string) (string, error) {
 			continue
 		}
 		if strings.HasSuffix(entry.Name(), ".gz") {
-			return filepath.Join(markerDir, entry.Name()), nil
+			gz = append(gz, entry.Name())
+		} else {
+			plain = append(plain, entry.Name())
 		}
-		raw = filepath.Join(markerDir, entry.Name())
 	}
-	if raw != "" {
-		return raw, nil
+	stems := make(map[string]struct{})
+	for _, f := range append(gz, plain...) {
+		stems[strings.TrimSuffix(strings.TrimSuffix(f, ".gz"), ".fasta")] = struct{}{}
+	}
+	if len(stems) > 1 {
+		files := append(gz, plain...)
+		sort.Strings(files)
+		return "", fmt.Errorf("ambiguous marker files for %q in %s: %s (remove all but one)", marker, markerDir, strings.Join(files, ", "))
+	}
+	if len(gz) > 0 {
+		return filepath.Join(markerDir, gz[0]), nil
+	}
+	if len(plain) > 0 {
+		return filepath.Join(markerDir, plain[0]), nil
 	}
 	return "", fmt.Errorf("marker FASTA not found in %s (looked for %s.fasta or %s.fasta.gz)", markerDir, name, name)
 }
