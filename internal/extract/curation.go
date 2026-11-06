@@ -2,6 +2,7 @@ package extract
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -41,6 +42,47 @@ func (c CurationConfig) Validate() error {
 		return fmt.Errorf("invalid audit path %q", c.AuditPath)
 	}
 	return nil
+}
+
+func rejectCurationPathAliases(outputPath string, cfg CurationConfig) error {
+	if cfg.ReportPath != "" {
+		if samePath(cfg.ReportPath, outputPath) {
+			return fmt.Errorf("curation report path %q refers to the output path", cfg.ReportPath)
+		}
+		if cfg.AuditPath != "" && samePath(cfg.ReportPath, cfg.AuditPath) {
+			return fmt.Errorf("curation report path %q refers to the audit path", cfg.ReportPath)
+		}
+	}
+	if cfg.AuditPath != "" && samePath(cfg.AuditPath, outputPath) {
+		return fmt.Errorf("curation audit path %q refers to the output path", cfg.AuditPath)
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	aAbs, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	bAbs, err := filepath.Abs(b)
+	if err != nil {
+		return false
+	}
+	if aAbs == bAbs {
+		return true
+	}
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(aInfo, bInfo)
 }
 
 func (c CurationConfig) enabled() bool {

@@ -15,6 +15,13 @@ import (
 const writerBufferSize = 1 << 20
 
 func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, curationCfg CurationConfig) (int, error) {
+	curationCfg = curationCfg.Normalized()
+	if err := curationCfg.Validate(); err != nil {
+		return 0, err
+	}
+	if err := rejectCurationPathAliases(outputPath, curationCfg); err != nil {
+		return 0, err
+	}
 	curator, err := NewCurator(curationCfg, inputPath)
 	if err != nil {
 		return 0, fmt.Errorf("create curation profile: %w", err)

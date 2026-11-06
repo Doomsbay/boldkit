@@ -3,7 +3,6 @@ package extract
 import (
 	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
@@ -19,7 +18,7 @@ type Bioscan5MCurator struct {
 	binsCanonical  int
 	binsConflicted int
 	stats          bioscanCurationStats
-	auditFile      *os.File
+	audit          *boldio.AtomicFile
 	auditWriter    *bufio.Writer
 }
 

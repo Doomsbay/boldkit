@@ -172,3 +172,56 @@ func TestBioscanReportAndAuditOutputs(t *testing.T) {
 		t.Fatalf("expected P2 change in audit, got:\n%s", string(auditBytes))
 	}
 }
+
+func TestBioscanFailedAuditWriteKeepsPreviousFiles(t *testing.T) {
+	tmp := t.TempDir()
+	input := filepath.Join(tmp, "input.tsv")
+	output := filepath.Join(tmp, "output.tsv")
+	report := filepath.Join(tmp, "curation_report.json")
+	audit := filepath.Join(tmp, "curation_audit.tsv")
+
+	content := strings.Join([]string{
+		"processid\tbin_uri\tkingdom\tphylum\tclass\torder\tfamily\tsubfamily\ttribe\tgenus\tspecies",
+		"P1\tBOLD:BIN5\tAnimalia\tChordata\tMammalia\tPrimates\tHominidae\t\t\tHomo\tHomo sapiens",
+	}, "\n") + "\n"
+	if err := os.WriteFile(input, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	previousAudit := "previous audit"
+	if err := os.WriteFile(audit, []byte(previousAudit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/full", audit+".tmp"); err != nil {
+		t.Skipf("/dev/full unavailable: %v", err)
+	}
+
+	cfg := CurationConfig{
+		Protocol:   ProtocolBioscan5M,
+		ReportPath: report,
+		AuditPath:  audit,
+	}.Normalized()
+	if _, err := BuildTaxonkit(input, output, 0, -1, cfg); err == nil {
+		t.Fatal("expected audit flush failure to fail the run")
+	}
+
+	got, err := os.ReadFile(audit)
+	if err != nil || string(got) != previousAudit {
+		t.Fatalf("previous audit damaged by failed write: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Errorf("temp file left behind after failed audit write: %s", entry.Name())
+		}
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().IsRegular() && info.Size() == 0 {
+			t.Errorf("zero-byte file left behind: %s", entry.Name())
+		}
+	}
+}

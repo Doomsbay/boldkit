@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -87,12 +88,12 @@ func (c *Bioscan5MCurator) openAudit() error {
 	if err := os.MkdirAll(filepath.Dir(c.cfg.AuditPath), 0o755); err != nil {
 		return fmt.Errorf("create audit dir: %w", err)
 	}
-	f, err := os.Create(c.cfg.AuditPath)
+	audit, err := boldio.CreateAtomic(c.cfg.AuditPath)
 	if err != nil {
 		return fmt.Errorf("create audit file: %w", err)
 	}
-	c.auditFile = f
-	c.auditWriter = bufio.NewWriterSize(f, writerBufferSize)
+	c.audit = audit
+	c.auditWriter = bufio.NewWriterSize(audit, writerBufferSize)
 	if _, err := c.auditWriter.WriteString("processid\tbin_uri\tgenus_before\tspecies_before\tsubfamily_before\tgenus_after\tspecies_after\tsubfamily_after\trules\n"); err != nil {
 		return fmt.Errorf("write audit header: %w", err)
 	}
@@ -107,11 +108,13 @@ func (c *Bioscan5MCurator) closeAudit() error {
 		}
 		c.auditWriter = nil
 	}
-	if c.auditFile != nil {
-		if err := c.auditFile.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("close audit: %w", err)
+	if c.audit != nil {
+		if firstErr != nil {
+			c.audit.Abort()
+		} else if err := c.audit.Commit(); err != nil {
+			firstErr = fmt.Errorf("publish audit: %w", err)
 		}
-		c.auditFile = nil
+		c.audit = nil
 	}
 	return firstErr
 }
@@ -145,15 +148,12 @@ func (c *Bioscan5MCurator) writeReport() error {
 	if err := os.MkdirAll(filepath.Dir(c.cfg.ReportPath), 0o755); err != nil {
 		return fmt.Errorf("create report dir: %w", err)
 	}
-	f, err := os.Create(c.cfg.ReportPath)
+	report, err := boldio.CreateAtomic(c.cfg.ReportPath)
 	if err != nil {
 		return fmt.Errorf("create report file: %w", err)
 	}
-	defer func() {
-		_ = f.Close()
-	}()
 
-	report := bioscanCurationReport{
+	reportData := bioscanCurationReport{
 		Protocol:       ProtocolBioscan5M,
 		RulesetVersion: bioscanRulesetVersion,
 		InputPath:      c.inputPath,
@@ -165,10 +165,19 @@ func (c *Bioscan5MCurator) writeReport() error {
 		},
 		Stats: c.stats,
 	}
-	enc := json.NewEncoder(f)
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(report); err != nil {
+	if err := enc.Encode(reportData); err != nil {
+		report.Abort()
 		return fmt.Errorf("write report: %w", err)
+	}
+	if _, err := report.Write([]byte(buf.String())); err != nil {
+		report.Abort()
+		return fmt.Errorf("write report: %w", err)
+	}
+	if err := report.Commit(); err != nil {
+		return fmt.Errorf("publish report: %w", err)
 	}
 	util.Logf("extract (%s): report -> %s", ProtocolBioscan5M, c.cfg.ReportPath)
 	return nil

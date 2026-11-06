@@ -2,33 +2,81 @@ package extract
 
 import (
 	"bufio"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	boldio "github.com/Doomsbay/BoldKit/internal/io"
 )
 
-func TestCloseAuditClosesFileAfterFlushError(t *testing.T) {
-	f, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
-	if err != nil {
+func TestCloseAuditCleansUpAfterFlushError(t *testing.T) {
+	tmp := t.TempDir()
+	audit := filepath.Join(tmp, "curation_audit.tsv")
+	if err := os.Symlink("/dev/full", audit+".tmp"); err != nil {
 		t.Skipf("/dev/full unavailable: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	writer := bufio.NewWriterSize(f, 64)
+	af, err := boldio.CreateAtomic(audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := bufio.NewWriterSize(af, 64)
 	if _, err := writer.WriteString("audit row\n"); err != nil {
 		t.Fatal(err)
 	}
-	curator := &Bioscan5MCurator{auditFile: f, auditWriter: writer}
+	curator := &Bioscan5MCurator{audit: af, auditWriter: writer}
 	if err := curator.closeAudit(); err == nil || !strings.Contains(err.Error(), "flush audit") {
 		t.Fatalf("expected flush error, got %v", err)
 	}
-	if _, err := f.Stat(); !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("audit file not closed: %v", err)
+	if _, err := os.Lstat(audit + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("audit temp not cleaned up: %v", err)
 	}
 	if err := curator.closeAudit(); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
 	}
+}
+
+func TestBuildTaxonkitRejectsCurationPathsAliasingOutput(t *testing.T) {
+	tmp := t.TempDir()
+	input := filepath.Join(tmp, "input.tsv")
+	output := filepath.Join(tmp, "out.tsv")
+	content := "processid\tbin_uri\tkingdom\nP1\t\tAnimalia\n"
+	if err := os.WriteFile(input, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, cfg := range map[string]CurationConfig{
+		"report aliases output": {Protocol: ProtocolBioscan5M, ReportPath: output},
+		"audit aliases output":  {Protocol: ProtocolBioscan5M, AuditPath: output},
+		"report aliases audit":  {Protocol: ProtocolBioscan5M, ReportPath: filepath.Join(tmp, "r.json"), AuditPath: filepath.Join(tmp, "r.json")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := BuildTaxonkit(input, output, 0, -1, cfg.Normalized()); err == nil {
+				t.Fatal("expected alias rejection")
+			} else if !strings.Contains(err.Error(), "refers to") {
+				t.Fatalf("expected alias error, got %v", err)
+			}
+			for _, path := range []string{output, output + ".tmp"} {
+				if _, err := os.Lstat(path); !os.IsNotExist(err) {
+					t.Fatalf("%s created before alias rejection: %v", path, err)
+				}
+			}
+		})
+	}
+
+	t.Run("symlink alias", func(t *testing.T) {
+		if err := os.WriteFile(output, []byte("previous"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		report := filepath.Join(tmp, "report_link.json")
+		if err := os.Symlink(output, report); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		cfg := CurationConfig{Protocol: ProtocolBioscan5M, ReportPath: report}
+		if _, err := BuildTaxonkit(input, output, 0, -1, cfg.Normalized()); err == nil || !strings.Contains(err.Error(), "refers to") {
+			t.Fatalf("expected symlink alias rejection, got %v", err)
+		}
+	})
 }
 
 func TestBuildTaxonkitErrorLeavesNoOutputs(t *testing.T) {
