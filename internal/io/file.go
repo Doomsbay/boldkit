@@ -64,28 +64,19 @@ func CopyFile(src, dest string) error {
 		_ = in.Close()
 	}()
 
-	out, err := os.Create(dest)
+	out, err := CreateAtomic(dest)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dest, err)
 	}
 
 	if _, err := io.Copy(out, in); err != nil {
-		return copyFailure(out, dest, fmt.Errorf("copy %s: %w", src, err))
+		out.Abort()
+		return fmt.Errorf("copy %s: %w", src, err)
 	}
-	if err := out.Sync(); err != nil {
-		return copyFailure(out, dest, fmt.Errorf("sync %s: %w", dest, err))
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(dest)
-		return fmt.Errorf("close %s: %w", dest, err)
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish %s: %w", dest, err)
 	}
 	return nil
-}
-
-func copyFailure(out *os.File, dest string, cause error) error {
-	_ = out.Close()
-	_ = os.Remove(dest)
-	return cause
 }
 
 func CopyDir(src, dest string) error {

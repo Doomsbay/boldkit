@@ -26,14 +26,18 @@ func TestCopyFileCopiesContent(t *testing.T) {
 	}
 }
 
-func TestCopyFileFailureKeepsSourceAndDestClean(t *testing.T) {
+func TestCopyFileFailureKeepsSourceAndPreviousDest(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.fasta")
 	if err := os.WriteFile(src, []byte(">P1\nACGT\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(dir, "dest.fasta")
-	if err := os.Symlink("/dev/full", dest); err != nil {
+	previous := []byte("previous copy")
+	if err := os.WriteFile(dest, previous, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/full", dest+".tmp"); err != nil {
 		t.Skipf("/dev/full unavailable: %v", err)
 	}
 
@@ -45,7 +49,11 @@ func TestCopyFileFailureKeepsSourceAndDestClean(t *testing.T) {
 	if err != nil || string(got) != ">P1\nACGT\n" {
 		t.Fatalf("source damaged by failed copy: %q, %v", got, err)
 	}
-	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
-		t.Errorf("partial destination left behind: %v", err)
+	gotDest, err := os.ReadFile(dest)
+	if err != nil || string(gotDest) != string(previous) {
+		t.Fatalf("previous destination lost by failed copy: %q, %v", gotDest, err)
+	}
+	if _, err := os.Lstat(dest + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind: %v", err)
 	}
 }

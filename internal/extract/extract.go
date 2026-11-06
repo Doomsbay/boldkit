@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
@@ -28,8 +27,7 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 	}
 	defer curator.Discard()
 
-	tmpPath := outputPath + ".tmp"
-	out, err := os.Create(tmpPath)
+	out, err := boldio.CreateAtomic(outputPath)
 	if err != nil {
 		return 0, fmt.Errorf("create output: %w", err)
 	}
@@ -37,8 +35,7 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 	committed := false
 	defer func() {
 		if !committed {
-			_ = out.Close()
-			_ = os.Remove(tmpPath)
+			out.Abort()
 		}
 	}()
 
@@ -135,10 +132,7 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 	if err := writer.Flush(); err != nil {
 		return 0, fmt.Errorf("flush output: %w", err)
 	}
-	if err := out.Close(); err != nil {
-		return 0, fmt.Errorf("close output: %w", err)
-	}
-	if err := os.Rename(tmpPath, outputPath); err != nil {
+	if err := out.Commit(); err != nil {
 		return 0, fmt.Errorf("publish output: %w", err)
 	}
 	committed = true
