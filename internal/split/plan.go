@@ -208,7 +208,7 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 		speciesCounts[group.label] += group.count
 	}
 
-	heldoutThreshold := heldoutHashThreshold(strategy.HeldoutFrac)
+	unseenHashBound := 256 - heldoutHashThreshold(strategy.HeldoutFrac)
 	includeSet := speciesSet(strategy.IncludeSpecies)
 	holdoutSet := speciesSet(strategy.HoldoutSpecies)
 	for name := range includeSet {
@@ -268,7 +268,7 @@ func buildSplitPlan(input string, labels map[string]string, invalidIDs map[strin
 			continue
 		}
 
-		if int(classHashByte(label)) < heldoutThreshold {
+		if int(classHashByte(label)) < unseenHashBound {
 			stats.UnseenClasses++
 			testTarget := minInt(strategy.MaxTestTargetPerClass, ceilDiv(permill(strategy.SeenTestTarget)*total, 1000))
 			valTarget := ceilDiv(permill(strategy.UnseenValTarget)*(total-testTarget), 1000)

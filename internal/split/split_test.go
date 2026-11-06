@@ -413,27 +413,40 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 
 	noHeldout := DefaultStrategy()
 	noHeldout.HeldoutFrac = 0
-	_, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, noHeldout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats.UnseenClasses != 0 || stats.HeldoutClasses != 1 {
-		t.Fatalf("expected heldout-frac 0 to hold out every non-seen species: %+v", stats)
-	}
-
-	noHeldoutSplit := DefaultStrategy()
-	noHeldoutSplit.HeldoutFrac = 1
-	_, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, noHeldoutSplit)
+	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, noHeldout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stats.UnseenClasses != 1 || stats.HeldoutClasses != 0 {
-		t.Fatalf("expected heldout-frac 1 to keep every non-seen species unseen: %+v", stats)
+		t.Fatalf("expected heldout-frac 0 to hold out nothing: %+v", stats)
+	}
+	for _, bucket := range plan.seqBucket {
+		if bucket == bucketHeldout {
+			t.Fatalf("expected heldout-frac 0 to leave the %s bucket empty", bucketHeldout)
+		}
+	}
+
+	allHeldout := DefaultStrategy()
+	allHeldout.HeldoutFrac = 1
+	plan, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, allHeldout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.UnseenClasses != 0 || stats.HeldoutClasses != 1 {
+		t.Fatalf("expected heldout-frac 1 to hold out every non-seen species: %+v", stats)
+	}
+	for hash, bucket := range plan.seqBucket {
+		if bucket == bucketHeldout {
+			continue
+		}
+		if bucket != bucketSeenTrain && bucket != bucketSeenVal && bucket != bucketSeenTest {
+			t.Fatalf("expected every non-seen group held out, hash %x in %s", hash, bucket)
+		}
 	}
 
 	tightTest := DefaultStrategy()
 	tightTest.MaxTestTargetPerClass = 1
-	plan, stats, err := buildSplitPlan(input, labels, invalidIDs, nil, tightTest)
+	plan, stats, err = buildSplitPlan(input, labels, invalidIDs, nil, tightTest)
 	if err != nil {
 		t.Fatal(err)
 	}
