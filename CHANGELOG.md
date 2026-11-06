@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.1]
+
+Verified against v0.8.0 on the 27-Mar-2026 snapshot: `pipeline` and default `split` outputs are byte-identical.
+
+### Fixed
+- **Safe publication for every output.** Classifier format outputs, the QC output FASTA and report, `split_report.json`, the bioscan-5m curation report/audit, archives and release metadata all write to temp files and rename into place only after a checked flush. A failed rerun keeps the earlier good outputs; no zero-byte or partial files remain.
+- **`PackageRelease` preserves its inputs.** Inputs (`nodes.dmp`, `names.dmp`, `taxid.map`, marker FASTAs, taxonomy TSV) are validated up front, archives are built from the original locations, and inputs are only consumed after the manifest and checksums succeed — a part-way failure leaves the inputs in place and a rerun with `-force` completes without manual cleanup.
+- `classify -compress` rejects an existing archive up front unless `-force` is set, instead of redoing QC and formatting and then silently keeping the stale archive. `PackageDirGzip` keeps its skip-if-exists behaviour for releases.
+- File copies check their flush results; a copy failure can no longer report success and cause a move to delete its source, and a failed overwrite keeps the previous copy.
+- `-heldout-frac` semantics corrected: `0` holds out nothing, `1` holds out every unseen class (the documented behaviour; the default `0.5` split is unchanged).
+- `split -run-qc` accepts duplicate process IDs in the raw input when `-qc-dedupe-ids` is set; duplicates remain a hard error without dedupe.
+- `split` and `classify` resolve `-markers` names sanitized and case-insensitively, matching how `markers` writes files (`-markers coi-5p` finds `COI-5P.fasta`).
+- Species labels are trimmed when loading the split label map, so surrounding whitespace no longer creates phantom species.
+- With `-run-qc=false`, barcode groups compare uppercased, gap-free sequences, so case or gap variants of one barcode can no longer leak between training and test buckets.
+- `classify` validates classifier names before QC or any output is written.
+- `extract` rejects `-curate-report`/`-curate-audit` paths that resolve to the `-output` path, and the curation report/audit publish only after the extract output itself is published.
+
+### Changed
+- Release naming treats `.tsv.gz` as one extension: a gzipped taxonomy input now produces `taxonomy.<snapshot>.tsv.gz` instead of `taxonomy.tsv.<snapshot>.gz`.
+- `SHA256SUMS.txt` is computed from the exact list of artifacts written by the run (archives, taxonomy gzip, `manifest.json`) instead of globbing the release directory, so it is complete and free of stale entries.
+- The manifest `commit_hash` comes from build info or the injected version (suffixed `-dirty` for modified working trees) instead of running `git rev-parse` in the working directory.
+- `split -h` documents that the at-least-one-training-barcode-group guarantee applies only to `-include-species` species.
+
 ## [v0.8.0]
 
 ### Added
