@@ -12,8 +12,8 @@ Verified against v0.8.0 on the 27-Mar-2026 snapshot: `pipeline` and default `spl
 - `classify -compress` rejects an existing archive up front unless `-force` is set, instead of redoing QC and formatting and then silently keeping the stale archive. `PackageDirGzip` keeps its skip-if-exists behaviour for releases.
 - File copies check their flush results; a copy failure can no longer report success and cause a move to delete its source, and a failed overwrite keeps the previous copy.
 - `-heldout-frac` semantics corrected: `0` holds out nothing, `1` holds out every unseen class (the documented behaviour; the default `0.5` split is unchanged).
-- `split -run-qc` accepts duplicate process IDs in the raw input when `-qc-dedupe-ids` is set; duplicates remain a hard error without dedupe.
-- `split` and `classify` resolve `-markers` names sanitized and case-insensitively, matching how `markers` writes files (`-markers coi-5p` finds `COI-5P.fasta`).
+- `split -run-qc` accepts duplicate process IDs in the raw input when `-qc-dedupe-ids` is set; duplicates remain a hard error without dedupe. A duplicate ID that QC will drop no longer marks a barcode as conflicting, so the surviving records keep their buckets and `conflict_records` is accurate.
+- `split` and `classify` resolve `-markers` names sanitized and case-insensitively, matching how `markers` writes files (`-markers coi-5p` finds `COI-5P.fasta`), and reject a directory holding two spellings of the same marker instead of silently picking one.
 - Species labels are trimmed when loading the split label map, so surrounding whitespace no longer creates phantom species.
 - With `-run-qc=false`, barcode groups compare uppercased, gap-free sequences, so case or gap variants of one barcode can no longer leak between training and test buckets.
 - `classify` validates classifier names before QC or any output is written.
