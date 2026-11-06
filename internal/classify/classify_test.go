@@ -7,6 +7,26 @@ import (
 	"testing"
 )
 
+func TestClassifyRejectsUnknownClassifierBeforeQC(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Input:       filepath.Join(dir, "missing-input.fasta"),
+		OutDir:      dir,
+		Classifiers: []string{"blast", "bogus"},
+	}
+	err := Classify(cfg)
+	if err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("expected unknown-classifier error, got %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("work performed before classifier validation: %v", entries)
+	}
+}
+
 func TestClassifyCompressStopsBeforeWorkWhenArchiveExists(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "blast.tar.gz")

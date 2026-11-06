@@ -26,6 +26,9 @@ type Config struct {
 }
 
 func Classify(cfg Config) error {
+	if err := format.ValidateClassifiers(cfg.Classifiers); err != nil {
+		return err
+	}
 	if cfg.Compress {
 		for _, classifier := range cfg.Classifiers {
 			if classifier == "" {
