@@ -15,8 +15,3 @@ linters:
     - staticcheck
     - unused
     - misspell
-  settings:
-    errcheck:
-      exclude-functions:
-        - (io.Closer).Close
-        - (*bufio.Writer).Flush
