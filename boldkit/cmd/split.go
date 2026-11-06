@@ -31,7 +31,7 @@ func runSplit(args []string) {
 	fs.Float64Var(&strategy.SeenValTarget, "val-frac-seen", strategy.SeenValTarget, "Validation fraction target for seen classes")
 	fs.Float64Var(&strategy.UnseenValTarget, "val-frac-unseen", strategy.UnseenValTarget, "Validation fraction target for unseen classes")
 	fs.Float64Var(&strategy.HeldoutFrac, "heldout-frac", strategy.HeldoutFrac, "Fraction of unseen classes held out entirely (0 disables the heldout bucket)")
-	includeSpecies := fs.String("include-species", "", "File listing species forced into the seen training reference (one name per line)")
+	includeSpecies := fs.String("include-species", "", "File listing species forced into the seen training reference (one name per line); only these listed species are guaranteed at least one training barcode group, naturally seen species keep greedy allocation")
 	holdoutSpecies := fs.String("holdout-species", "", "File listing species forced into the heldout bucket (one name per line)")
 	runQC := fs.Bool("run-qc", true, "Run QC before splitting")
 	qcMin := fs.Int("qc-min-length", 200, "QC minimum cleaned length")
