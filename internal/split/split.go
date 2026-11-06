@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/Doomsbay/BoldKit/internal/format"
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
@@ -264,11 +265,12 @@ func loadProcessLabelMap(path string, wantedIDs map[string]struct{}) (map[string
 			return nil
 		}
 
-		if util.IsNull(row.Fields[idxSpecies]) || len(row.Fields[idxSpecies]) == 0 {
+		species := strings.TrimSpace(string(row.Fields[idxSpecies]))
+		if species == "" || util.IsNull([]byte(species)) {
 			invalid[pid] = struct{}{}
 			return nil
 		}
-		label := string(row.Fields[idxSpecies])
+		label := species
 		if prev, ok := labels[pid]; ok && prev != label {
 			return fmt.Errorf("line %d: processid %s maps to multiple labels (%s, %s)", row.Line, pid, prev, label)
 		}

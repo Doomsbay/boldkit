@@ -519,6 +519,37 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 	}
 }
 
+func TestLoadProcessLabelMapTrimsSpeciesLabels(t *testing.T) {
+	dir := t.TempDir()
+	taxonkit := filepath.Join(dir, "taxonkit_input.tsv")
+	content := "processid\tspecies\n" +
+		"P1\t Alpha \n" +
+		"P2\tAlpha\n" +
+		"P3\t  \n" +
+		"P4\t None \n"
+	if err := os.WriteFile(taxonkit, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	labels, invalid, err := loadProcessLabelMap(taxonkit, map[string]struct{}{"P1": {}, "P2": {}, "P3": {}, "P4": {}})
+	if err != nil {
+		t.Fatalf("loadProcessLabelMap: %v", err)
+	}
+	for pid, want := range map[string]string{"P1": "Alpha", "P2": "Alpha"} {
+		if got := labels[pid]; got != want {
+			t.Errorf("label[%s] = %q, want %q", pid, got, want)
+		}
+	}
+	for _, pid := range []string{"P3", "P4"} {
+		if _, ok := invalid[pid]; !ok {
+			t.Errorf("expected %s with blank/null species to be invalid", pid)
+		}
+		if _, ok := labels[pid]; ok {
+			t.Errorf("expected %s to have no label", pid)
+		}
+	}
+}
+
 func writeTwoGroupFixture(t *testing.T, dir string) (input, taxonkit string) {
 	t.Helper()
 	var fasta strings.Builder
