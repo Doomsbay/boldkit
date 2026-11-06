@@ -26,6 +26,18 @@ type Config struct {
 }
 
 func Classify(cfg Config) error {
+	if cfg.Compress {
+		for _, classifier := range cfg.Classifiers {
+			if classifier == "" {
+				continue
+			}
+			archive := filepath.Join(cfg.OutDir, strings.ToLower(classifier)+".tar.gz")
+			if boldio.FileExists(archive) && !cfg.Force {
+				return fmt.Errorf("archive exists (use --force to overwrite): %s", archive)
+			}
+		}
+	}
+
 	base := boldio.QCBaseName(cfg.Input)
 	qcOut := filepath.Join(cfg.OutDir, "qc", base+".fasta")
 	qcCfg := cfg.QC

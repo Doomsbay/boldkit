@@ -18,16 +18,14 @@ func PackageDirGzip(srcDir, destTarGz string, force bool) error {
 		return fmt.Errorf("create releases dir: %w", err)
 	}
 
-	out, err := os.Create(destTarGz)
+	out, err := CreateAtomic(destTarGz)
 	if err != nil {
 		return fmt.Errorf("create archive: %w", err)
 	}
-	defer func() {
-		_ = out.Close()
-	}()
 
 	gzw, err := gzip.NewWriterLevel(out, gzip.BestSpeed)
 	if err != nil {
+		out.Abort()
 		return fmt.Errorf("create gzip writer: %w", err)
 	}
 	tw := tar.NewWriter(gzw)
@@ -65,15 +63,21 @@ func PackageDirGzip(srcDir, destTarGz string, force bool) error {
 	}); err != nil {
 		_ = tw.Close()
 		_ = gzw.Close()
+		out.Abort()
 		return err
 	}
 
 	if err := tw.Close(); err != nil {
 		_ = gzw.Close()
+		out.Abort()
 		return err
 	}
 	if err := gzw.Close(); err != nil {
+		out.Abort()
 		return err
+	}
+	if err := out.Commit(); err != nil {
+		return fmt.Errorf("publish archive: %w", err)
 	}
 	return nil
 }
