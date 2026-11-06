@@ -295,10 +295,7 @@ func packageTaxonkitGzip(src, dest string, force bool) error {
 		out.Abort()
 		return fmt.Errorf("finalize gzip: %w", err)
 	}
-	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish taxonkit gzip: %w", err)
-	}
-	return nil
+	return out.Commit()
 }
 
 type ReleaseFile struct {
@@ -327,10 +324,7 @@ func WriteChecksums(outputFile string, files []ReleaseFile, force bool) error {
 			return fmt.Errorf("write checksums: %w", err)
 		}
 	}
-	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish checksums: %w", err)
-	}
-	return nil
+	return out.Commit()
 }
 
 func WriteManifest(path, taxdumpDir, markerDir, snapshot, version string, force bool) error {
@@ -397,10 +391,7 @@ func WriteManifest(path, taxdumpDir, markerDir, snapshot, version string, force 
 		out.Abort()
 		return fmt.Errorf("write manifest: %w", err)
 	}
-	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish manifest: %w", err)
-	}
-	return nil
+	return out.Commit()
 }
 
 func releaseCommitHash(version string) string {

@@ -76,8 +76,5 @@ func PackageDirGzip(srcDir, destTarGz string, force bool) error {
 		out.Abort()
 		return err
 	}
-	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish archive: %w", err)
-	}
-	return nil
+	return out.Commit()
 }

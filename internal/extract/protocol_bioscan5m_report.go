@@ -118,14 +118,14 @@ func (c *Bioscan5MCurator) Publish() error {
 		if err := c.audit.Commit(); err != nil {
 			c.audit = nil
 			c.Discard()
-			return fmt.Errorf("publish audit: %w", err)
+			return err
 		}
 		c.audit = nil
 	}
 	if c.report != nil {
 		if err := c.report.Commit(); err != nil {
 			c.report = nil
-			return fmt.Errorf("publish report: %w", err)
+			return err
 		}
 		c.report = nil
 		util.Logf("extract (%s): report -> %s", ProtocolBioscan5M, c.cfg.ReportPath)

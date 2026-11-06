@@ -105,12 +105,10 @@ type TaxonRecord struct {
 
 type Curator interface {
 	Curate(*TaxonRecord) error
-	// Finalize flushes the report and audit to temp files; nothing is published yet.
 	Finalize() error
-	// Publish renames the finalized report and audit into place. Call only after
-	// the extract output itself has been published.
+	// Publish renames the finalized report and audit into place; call it only
+	// after the extract output itself has been published.
 	Publish() error
-	// Discard abandons any unpublished report and audit, keeping previous files.
 	Discard()
 }
 

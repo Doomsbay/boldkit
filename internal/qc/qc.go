@@ -236,7 +236,7 @@ func RunQC(input string, cfg Config) error {
 		return fmt.Errorf("flush output: %w", err)
 	}
 	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish output: %w", err)
+		return err
 	}
 	committed = true
 

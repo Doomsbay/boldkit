@@ -309,8 +309,5 @@ func writeSplitReport(path string, report splitReport) error {
 		out.Abort()
 		return fmt.Errorf("write split report: %w", err)
 	}
-	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish split report: %w", err)
-	}
-	return nil
+	return out.Commit()
 }

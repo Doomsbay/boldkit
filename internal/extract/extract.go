@@ -133,7 +133,7 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 		return 0, fmt.Errorf("flush output: %w", err)
 	}
 	if err := out.Commit(); err != nil {
-		return 0, fmt.Errorf("publish output: %w", err)
+		return 0, err
 	}
 	committed = true
 	if err := curator.Publish(); err != nil {

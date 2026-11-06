@@ -73,10 +73,7 @@ func CopyFile(src, dest string) error {
 		out.Abort()
 		return fmt.Errorf("copy %s: %w", src, err)
 	}
-	if err := out.Commit(); err != nil {
-		return fmt.Errorf("publish %s: %w", dest, err)
-	}
-	return nil
+	return out.Commit()
 }
 
 func CopyDir(src, dest string) error {

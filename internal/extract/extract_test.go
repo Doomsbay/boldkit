@@ -171,7 +171,7 @@ func TestBuildTaxonkitPublishFailurePreservesTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected publish error")
 	}
-	if !strings.Contains(err.Error(), "publish output") {
+	if !strings.Contains(err.Error(), "publish") || !strings.Contains(err.Error(), output) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	entries, err := os.ReadDir(tmp)
