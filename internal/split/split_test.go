@@ -132,6 +132,56 @@ func runSplitFixture(t *testing.T, dedupe bool, gammaFirst bool) (splitReport, s
 	return report, outDir
 }
 
+func TestSplitRunQCAcceptsDuplicateIDsWithDedupe(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	fasta := ">P1\nACGTACGTAC\n>P1\nACGTACGTAC\n>P3\nTTTTGGCCAA\n>P5\nAAAAACCCCC\n>P6\nGGGGGTTTTT\n"
+	if err := os.WriteFile(input, []byte(fasta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxonkit := filepath.Join(dir, "taxonkit_input.tsv")
+	if err := os.WriteFile(taxonkit, []byte("processid\tspecies\nP1\tAlpha\nP3\tAlpha\nP5\tAlpha\nP6\tAlpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxdumpDir := filepath.Join(dir, "taxdump")
+	writeSplitTaxdump(t, taxdumpDir, []string{"P1", "P3", "P5", "P6"})
+
+	strategy := DefaultStrategy()
+	strategy.MinSeenRecords = 1
+	strategy.MinSeenBarcodes = 1
+	outDir := filepath.Join(dir, "libraries")
+	cfg := Config{
+		Input:         input,
+		OutDir:        outDir,
+		TaxonkitInput: taxonkit,
+		Classifiers:   []string{"blast"},
+		TaxdumpDir:    taxdumpDir,
+		RunQC:         true,
+		Strategy:      strategy,
+		QC: qc.Config{
+			GapPolicy:  qc.GapPolicyDrop,
+			DedupeSeqs: true,
+			DedupeIDs:  true,
+		},
+	}
+	if err := SplitOne(cfg); err != nil {
+		t.Fatalf("SplitOne with duplicate IDs and dedupe: %v", err)
+	}
+
+	qcOut, err := os.ReadFile(filepath.Join(outDir, "qc", "input.fasta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(qcOut), ">P1"); got != 1 {
+		t.Fatalf("expected duplicate P1 deduplicated exactly once in QC output, found %d:\n%s", got, qcOut)
+	}
+
+	cfg.QC.DedupeIDs = false
+	if err := SplitOne(cfg); err == nil || !strings.Contains(err.Error(), "duplicate processid") {
+		t.Fatalf("expected duplicate-ID rejection without dedupe, got %v", err)
+	}
+}
+
 func TestSplitConflictExcludedFromTrainingUnderQCDedup(t *testing.T) {
 	report, outDir := runSplitFixture(t, true, true)
 	stats := report.Stats
@@ -358,7 +408,7 @@ func TestBuildSplitPlanDetectsConflictsWithoutQC(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, true)
 
-	fastaIDs, err := collectFastaIDs(input)
+	fastaIDs, err := collectFastaIDs(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +442,7 @@ func TestSplitStrategyOverridesBucketPolicies(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, true)
 
-	fastaIDs, err := collectFastaIDs(input)
+	fastaIDs, err := collectFastaIDs(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +547,7 @@ func TestSplitIncludeSpeciesForcesSeenWithTrainingRecord(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, true)
 
-	fastaIDs, err := collectFastaIDs(input)
+	fastaIDs, err := collectFastaIDs(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +579,7 @@ func TestSplitIncludeSpeciesGuaranteesTrainingWithTwoGroups(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeTwoGroupFixture(t, dir)
 
-	fastaIDs, err := collectFastaIDs(input)
+	fastaIDs, err := collectFastaIDs(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +625,7 @@ func TestSplitHoldoutSpeciesForcedToHeldout(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, true)
 
-	fastaIDs, err := collectFastaIDs(input)
+	fastaIDs, err := collectFastaIDs(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +660,7 @@ func TestBuildSplitPlanDefaultStrategyGoldenBuckets(t *testing.T) {
 	dir := t.TempDir()
 	input, taxonkit := writeSplitFixture(t, dir, true)
 
-	fastaIDs, err := collectFastaIDs(input)
+	fastaIDs, err := collectFastaIDs(input, false)
 	if err != nil {
 		t.Fatal(err)
 	}

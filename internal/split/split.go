@@ -98,7 +98,7 @@ func SplitOne(cfg Config) error {
 		invalidIDs map[string]struct{}
 	)
 	if cfg.RunQC {
-		fastaIDs, err := collectFastaIDs(cfg.Input)
+		fastaIDs, err := collectFastaIDs(cfg.Input, cfg.QC.DedupeIDs)
 		if err != nil {
 			return err
 		}
@@ -122,7 +122,7 @@ func SplitOne(cfg Config) error {
 		}
 		splitInput = qcOut
 	} else {
-		fastaIDs, err := collectFastaIDs(splitInput)
+		fastaIDs, err := collectFastaIDs(splitInput, false)
 		if err != nil {
 			return err
 		}
@@ -195,7 +195,7 @@ func SplitOne(cfg Config) error {
 	return nil
 }
 
-func collectFastaIDs(input string) (map[string]struct{}, error) {
+func collectFastaIDs(input string, allowDuplicates bool) (map[string]struct{}, error) {
 	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return nil, fmt.Errorf("open input: %w", err)
@@ -209,7 +209,7 @@ func collectFastaIDs(input string) (map[string]struct{}, error) {
 		if rec.ID == "" {
 			return fmt.Errorf("found FASTA record with empty ID")
 		}
-		if _, dup := ids[rec.ID]; dup {
+		if _, dup := ids[rec.ID]; dup && !allowDuplicates {
 			return fmt.Errorf("duplicate processid in input FASTA: %s", rec.ID)
 		}
 		ids[rec.ID] = struct{}{}
