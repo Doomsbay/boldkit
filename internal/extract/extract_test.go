@@ -10,7 +10,7 @@ import (
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
 )
 
-func TestCloseAuditCleansUpAfterFlushError(t *testing.T) {
+func TestFinalizeAuditCleansUpAfterFlushError(t *testing.T) {
 	tmp := t.TempDir()
 	audit := filepath.Join(tmp, "curation_audit.tsv")
 	if err := os.Symlink("/dev/full", audit+".tmp"); err != nil {
@@ -25,15 +25,16 @@ func TestCloseAuditCleansUpAfterFlushError(t *testing.T) {
 		t.Fatal(err)
 	}
 	curator := &Bioscan5MCurator{audit: af, auditWriter: writer}
-	if err := curator.closeAudit(); err == nil || !strings.Contains(err.Error(), "flush audit") {
+	if err := curator.Finalize(); err == nil || !strings.Contains(err.Error(), "flush audit") {
 		t.Fatalf("expected flush error, got %v", err)
 	}
 	if _, err := os.Lstat(audit + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("audit temp not cleaned up: %v", err)
 	}
-	if err := curator.closeAudit(); err != nil {
-		t.Fatalf("repeated cleanup: %v", err)
+	if err := curator.Finalize(); err != nil {
+		t.Fatalf("repeated finalize: %v", err)
 	}
+	curator.Discard()
 }
 
 func TestBuildTaxonkitRejectsCurationPathsAliasingOutput(t *testing.T) {
@@ -77,6 +78,59 @@ func TestBuildTaxonkitRejectsCurationPathsAliasingOutput(t *testing.T) {
 			t.Fatalf("expected symlink alias rejection, got %v", err)
 		}
 	})
+}
+
+func TestBuildTaxonkitPublishFailureKeepsCurationFiles(t *testing.T) {
+	tmp := t.TempDir()
+	input := filepath.Join(tmp, "input.tsv")
+	output := filepath.Join(tmp, "out.tsv")
+	report := filepath.Join(tmp, "curation_report.json")
+	audit := filepath.Join(tmp, "curation_audit.tsv")
+	content := strings.Join([]string{
+		"processid\tbin_uri\tkingdom\tphylum\tclass\torder\tfamily\tsubfamily\ttribe\tgenus\tspecies",
+		"P1\tBOLD:BIN9\tAnimalia\tChordata\tMammalia\tPrimates\tHominidae\t\t\tHomo\tHomo sapiens",
+	}, "\n") + "\n"
+	if err := os.WriteFile(input, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(output, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previousReport := `{"previous": true}`
+	previousAudit := "previous audit"
+	if err := os.WriteFile(report, []byte(previousReport), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audit, []byte(previousAudit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := CurationConfig{
+		Protocol:   ProtocolBioscan5M,
+		ReportPath: report,
+		AuditPath:  audit,
+	}.Normalized()
+	if _, err := BuildTaxonkit(input, output, 0, -1, cfg); err == nil {
+		t.Fatal("expected output publish failure")
+	}
+
+	gotReport, err := os.ReadFile(report)
+	if err != nil || string(gotReport) != previousReport {
+		t.Fatalf("report replaced by unpublished run: %q, %v", gotReport, err)
+	}
+	gotAudit, err := os.ReadFile(audit)
+	if err != nil || string(gotAudit) != previousAudit {
+		t.Fatalf("audit replaced by unpublished run: %q, %v", gotAudit, err)
+	}
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Errorf("temp file left behind after failed publish: %s", entry.Name())
+		}
+	}
 }
 
 func TestBuildTaxonkitErrorLeavesNoOutputs(t *testing.T) {

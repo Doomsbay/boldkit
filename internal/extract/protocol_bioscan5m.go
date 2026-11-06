@@ -20,6 +20,7 @@ type Bioscan5MCurator struct {
 	stats          bioscanCurationStats
 	audit          *boldio.AtomicFile
 	auditWriter    *bufio.Writer
+	report         *boldio.AtomicFile
 }
 
 func NewBioscan5MCurator(cfg CurationConfig, inputPath string) (Curator, error) {
@@ -30,12 +31,12 @@ func NewBioscan5MCurator(cfg CurationConfig, inputPath string) (Curator, error) 
 		binCanonical: make(map[string]bioscanSpeciesInfo),
 	}
 	if err := c.openAudit(); err != nil {
-		_ = c.closeAudit()
+		c.Discard()
 		return nil, err
 	}
 	if inputPath != "" {
 		if err := c.prime(inputPath); err != nil {
-			_ = c.closeAudit()
+			c.Discard()
 			return nil, err
 		}
 	}
@@ -214,14 +215,10 @@ func (c *Bioscan5MCurator) Curate(rec *TaxonRecord) error {
 	return nil
 }
 
-func (c *Bioscan5MCurator) Close() error {
+func (c *Bioscan5MCurator) Finalize() error {
 	util.Logf("extract (%s): bins-observed=%d bins-canonical=%d bins-conflicted=%d", ProtocolBioscan5M, c.binsObserved, c.binsCanonical, c.binsConflicted)
-	var firstErr error
-	if err := c.writeReport(); err != nil && firstErr == nil {
-		firstErr = err
+	if err := c.finalizeAudit(); err != nil {
+		return err
 	}
-	if err := c.closeAudit(); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	return firstErr
+	return c.writeReport()
 }

@@ -100,23 +100,51 @@ func (c *Bioscan5MCurator) openAudit() error {
 	return nil
 }
 
-func (c *Bioscan5MCurator) closeAudit() error {
-	var firstErr error
-	if c.auditWriter != nil {
-		if err := c.auditWriter.Flush(); err != nil {
-			firstErr = fmt.Errorf("flush audit: %w", err)
-		}
-		c.auditWriter = nil
+func (c *Bioscan5MCurator) finalizeAudit() error {
+	if c.auditWriter == nil {
+		return nil
 	}
+	if err := c.auditWriter.Flush(); err != nil {
+		c.auditWriter = nil
+		c.Discard()
+		return fmt.Errorf("flush audit: %w", err)
+	}
+	c.auditWriter = nil
+	return nil
+}
+
+func (c *Bioscan5MCurator) Publish() error {
 	if c.audit != nil {
-		if firstErr != nil {
-			c.audit.Abort()
-		} else if err := c.audit.Commit(); err != nil {
-			firstErr = fmt.Errorf("publish audit: %w", err)
+		if err := c.audit.Commit(); err != nil {
+			c.audit = nil
+			c.Discard()
+			return fmt.Errorf("publish audit: %w", err)
 		}
 		c.audit = nil
 	}
-	return firstErr
+	if c.report != nil {
+		if err := c.report.Commit(); err != nil {
+			c.report = nil
+			return fmt.Errorf("publish report: %w", err)
+		}
+		c.report = nil
+		util.Logf("extract (%s): report -> %s", ProtocolBioscan5M, c.cfg.ReportPath)
+	}
+	return nil
+}
+
+func (c *Bioscan5MCurator) Discard() {
+	if c.auditWriter != nil {
+		c.auditWriter = nil
+	}
+	if c.audit != nil {
+		c.audit.Abort()
+		c.audit = nil
+	}
+	if c.report != nil {
+		c.report.Abort()
+		c.report = nil
+	}
 }
 
 func (c *Bioscan5MCurator) writeAuditRow(before, after TaxonRecord, ruleSet map[string]struct{}, changed bool) error {
@@ -176,10 +204,7 @@ func (c *Bioscan5MCurator) writeReport() error {
 		report.Abort()
 		return fmt.Errorf("write report: %w", err)
 	}
-	if err := report.Commit(); err != nil {
-		return fmt.Errorf("publish report: %w", err)
-	}
-	util.Logf("extract (%s): report -> %s", ProtocolBioscan5M, c.cfg.ReportPath)
+	c.report = report
 	return nil
 }
 

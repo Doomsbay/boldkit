@@ -26,9 +26,7 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 	if err != nil {
 		return 0, fmt.Errorf("create curation profile: %w", err)
 	}
-	if c, ok := curator.(*Bioscan5MCurator); ok {
-		defer func() { _ = c.closeAudit() }()
-	}
+	defer curator.Discard()
 
 	tmpPath := outputPath + ".tmp"
 	out, err := os.Create(tmpPath)
@@ -131,7 +129,7 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 	}
 
 	progress.Finish()
-	if err := curator.Close(); err != nil {
+	if err := curator.Finalize(); err != nil {
 		return 0, fmt.Errorf("finalize curation profile: %w", err)
 	}
 	if err := writer.Flush(); err != nil {
@@ -144,5 +142,8 @@ func BuildTaxonkit(inputPath, outputPath string, reportEvery, totalRows int, cur
 		return 0, fmt.Errorf("publish output: %w", err)
 	}
 	committed = true
+	if err := curator.Publish(); err != nil {
+		return 0, fmt.Errorf("publish curation profile: %w", err)
+	}
 	return rowCount, nil
 }
