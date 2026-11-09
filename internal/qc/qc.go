@@ -9,7 +9,6 @@ import (
 
 	boldio "github.com/Doomsbay/BoldKit/internal/io"
 	boldprogress "github.com/Doomsbay/BoldKit/internal/progress"
-	boldtaxonomy "github.com/Doomsbay/BoldKit/internal/taxonomy"
 	"github.com/Doomsbay/BoldKit/internal/util"
 )
 
@@ -75,25 +74,9 @@ func RunQC(input string, cfg Config) error {
 		return fmt.Errorf("validate output: %w", err)
 	}
 
-	var taxidMap map[string]int
-	var dump *boldtaxonomy.TaxDump
-	if len(cfg.RequireRanks) > 0 || cfg.TaxidMapPath != "" {
-		taxidPath := cfg.TaxidMapPath
-		if taxidPath == "" {
-			taxidPath = filepath.Join(cfg.TaxdumpDir, "taxid.map")
-		}
-		taxidMap, err = boldtaxonomy.LoadTaxidMap(taxidPath)
-		if err != nil {
-			return err
-		}
-	}
-	if len(cfg.RequireRanks) > 0 {
-		nodesPath := filepath.Join(cfg.TaxdumpDir, "nodes.dmp")
-		namesPath := filepath.Join(cfg.TaxdumpDir, "names.dmp")
-		dump, err = boldtaxonomy.LoadTaxDump(nodesPath, namesPath)
-		if err != nil {
-			return err
-		}
+	filter, err := NewRecordFilter(cfg)
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(cfg.OutputPath), 0o755); err != nil {
@@ -123,103 +106,66 @@ func RunQC(input string, cfg Config) error {
 			return nil
 		}
 
-		var taxid int
-		if taxidMap != nil {
-			var ok bool
-			taxid, ok = taxidMap[rec.ID]
-			if !ok {
-				stats.MissingTaxID++
-				updateByteProgress(bar, counter, &lastCount)
-				return nil
-			}
-		}
-
-		if len(cfg.RequireRanks) > 0 && dump != nil {
-			lineage := dump.Lineage(taxid)
-			if !boldtaxonomy.HasAllRanks(lineage, cfg.RequireRanks) {
-				stats.MissingRanks++
-				updateByteProgress(bar, counter, &lastCount)
-				return nil
-			}
-		}
-
-		clean, counts := CleanSequenceForPolicy(cfg.GapPolicy, rec.Seq)
-		if cfg.GapPolicy == GapPolicyDrop && counts.Gapped > 0 {
+		clean, counts, reason := filter.Accept(rec.ID, rec.Seq)
+		switch reason {
+		case RejectTaxID:
+			stats.MissingTaxID++
+		case RejectRanks:
+			stats.MissingRanks++
+		case RejectGapped:
 			stats.Gapped++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if counts.Bases == 0 {
+		case RejectShort:
 			stats.TooShort++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if cfg.MinLen > 0 && counts.Bases < cfg.MinLen {
-			stats.TooShort++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if cfg.MaxLen > 0 && counts.Bases > cfg.MaxLen {
+		case RejectLong:
 			stats.TooLong++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if cfg.MaxN >= 0 && counts.N > cfg.MaxN {
+		case RejectN:
 			stats.TooManyN++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if cfg.MaxAmbig >= 0 && counts.Ambig > cfg.MaxAmbig {
+		case RejectAmbig:
 			stats.TooManyAmbig++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if counts.Invalid > cfg.MaxInvalid {
+		case RejectInvalid:
 			stats.TooManyInvalid++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
+		case RejectNone:
+			dupSeq := false
+			if cfg.DedupeSeqs {
+				_, dupSeq = seenSeqs[string(clean)]
+			}
+			dupID := false
+			if cfg.DedupeIDs {
+				_, dupID = seenIDs[rec.ID]
+			}
+			if dupSeq {
+				stats.DupeSeq++
+				updateByteProgress(bar, counter, &lastCount)
+				return nil
+			}
+			if dupID {
+				stats.DupeID++
+				updateByteProgress(bar, counter, &lastCount)
+				return nil
+			}
+			if cfg.DedupeSeqs {
+				seenSeqs[string(clean)] = struct{}{}
+			}
+			if cfg.DedupeIDs {
+				seenIDs[rec.ID] = struct{}{}
+			}
 
-		dupSeq := false
-		if cfg.DedupeSeqs {
-			_, dupSeq = seenSeqs[string(clean)]
-		}
-		dupID := false
-		if cfg.DedupeIDs {
-			_, dupID = seenIDs[rec.ID]
-		}
-		if dupSeq {
-			stats.DupeSeq++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if dupID {
-			stats.DupeID++
-			updateByteProgress(bar, counter, &lastCount)
-			return nil
-		}
-		if cfg.DedupeSeqs {
-			seenSeqs[string(clean)] = struct{}{}
-		}
-		if cfg.DedupeIDs {
-			seenIDs[rec.ID] = struct{}{}
-		}
-
-		if _, err := writer.WriteString(">" + rec.ID + "\n"); err != nil {
-			return fmt.Errorf("write header: %w", err)
-		}
-		if _, err := writer.Write(clean); err != nil {
-			return fmt.Errorf("write seq: %w", err)
-		}
-		if _, err := writer.WriteString("\n"); err != nil {
-			return fmt.Errorf("write newline: %w", err)
-		}
-		stats.Written++
-		if counts.TerminalN > 0 {
-			stats.TerminalN += counts.TerminalN
-		}
-		if counts.TerminalConverted > 0 {
-			stats.PaddedRecords++
+			if _, err := writer.WriteString(">" + rec.ID + "\n"); err != nil {
+				return fmt.Errorf("write header: %w", err)
+			}
+			if _, err := writer.Write(clean); err != nil {
+				return fmt.Errorf("write seq: %w", err)
+			}
+			if _, err := writer.WriteString("\n"); err != nil {
+				return fmt.Errorf("write newline: %w", err)
+			}
+			stats.Written++
+			if counts.TerminalN > 0 {
+				stats.TerminalN += counts.TerminalN
+			}
+			if counts.TerminalConverted > 0 {
+				stats.PaddedRecords++
+			}
 		}
 		updateByteProgress(bar, counter, &lastCount)
 		return nil

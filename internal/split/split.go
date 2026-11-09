@@ -107,10 +107,6 @@ func SplitOne(cfg Config) error {
 		if err != nil {
 			return err
 		}
-		conflicts, err = detectSequenceLabelConflicts(cfg.Input, labels, invalidIDs, cfg.QC.GapPolicy, cfg.QC.DedupeIDs)
-		if err != nil {
-			return err
-		}
 		qcOut := filepath.Join(cfg.OutDir, "qc", boldio.QCBaseName(cfg.Input)+".fasta")
 		util.Logf("split: QC -> %s", qcOut)
 		qcCfg := cfg.QC
@@ -118,6 +114,14 @@ func SplitOne(cfg Config) error {
 		qcCfg.TaxdumpDir = cfg.TaxdumpDir
 		qcCfg.TaxidMapPath = cfg.TaxidMapPath
 		qcCfg.OutputPath = qcOut
+		filter, err := qc.NewRecordFilter(qcCfg)
+		if err != nil {
+			return err
+		}
+		conflicts, err = detectSequenceLabelConflicts(cfg.Input, labels, invalidIDs, filter, qcCfg.DedupeIDs)
+		if err != nil {
+			return err
+		}
 		if err := qc.RunQC(cfg.Input, qcCfg); err != nil {
 			return fmt.Errorf("qc failed: %w", err)
 		}

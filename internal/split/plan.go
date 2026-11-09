@@ -98,7 +98,7 @@ func heldoutHashThreshold(frac float64) int {
 	return ceilDiv(permill(frac)*256, 1000)
 }
 
-func detectSequenceLabelConflicts(input string, labels map[string]string, invalidIDs map[string]struct{}, gapPolicy string, skipDuplicateIDs bool) (conflictReport, error) {
+func detectSequenceLabelConflicts(input string, labels map[string]string, invalidIDs map[string]struct{}, filter *qc.RecordFilter, skipDuplicateIDs bool) (conflictReport, error) {
 	in, err := boldio.OpenInput(input)
 	if err != nil {
 		return conflictReport{}, fmt.Errorf("open input: %w", err)
@@ -108,7 +108,7 @@ func detectSequenceLabelConflicts(input string, labels map[string]string, invali
 	}()
 
 	groups := make(map[[16]byte]barcodeGroup)
-	seenIDs := make(map[string]struct{})
+	seenAccepted := make(map[string]struct{})
 	err = boldio.ParseFasta(in, func(rec boldio.FASTARecord) error {
 		if _, bad := invalidIDs[rec.ID]; bad {
 			return nil
@@ -117,13 +117,15 @@ func detectSequenceLabelConflicts(input string, labels map[string]string, invali
 		if !ok {
 			return nil
 		}
+		clean, _, reason := filter.Accept(rec.ID, rec.Seq)
 		if skipDuplicateIDs {
-			if _, dup := seenIDs[rec.ID]; dup {
+			if _, seen := seenAccepted[rec.ID]; seen {
 				return nil
 			}
-			seenIDs[rec.ID] = struct{}{}
+			if reason == qc.RejectNone {
+				seenAccepted[rec.ID] = struct{}{}
+			}
 		}
-		clean, _ := qc.CleanSequenceForPolicy(gapPolicy, rec.Seq)
 		if len(clean) == 0 {
 			return nil
 		}

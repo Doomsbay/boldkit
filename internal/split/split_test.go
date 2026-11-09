@@ -192,12 +192,81 @@ func TestSplitConflictCheckIgnoresDuplicateIDQCWouldDrop(t *testing.T) {
 	}
 
 	labels := map[string]string{"P1": "Alpha", "P2": "Beta", "P3": "Beta", "P4": "Beta"}
-	conflicts, err := detectSequenceLabelConflicts(input, labels, nil, qc.GapPolicyDrop, false)
+	filter, err := qc.NewRecordFilter(qc.Config{GapPolicy: qc.GapPolicyDrop})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflicts, err := detectSequenceLabelConflicts(input, labels, nil, filter, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if conflicts.groups != 1 {
 		t.Fatalf("genuine conflicts must still be detected without skipping: %+v", conflicts)
+	}
+}
+
+func TestSplitConflictCheckSeesCopyQCKeeps(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.fasta")
+	fasta := ">P1\nACGTNCGTAC\n>P1\nTTTTGGCCAA\n>P2\nTTTTGGCCAA\n>P3\nAAAAACCCCC\n>P4\nGGGGGTTTTT\n>P5\nACGTACGTAAT\n"
+	if err := os.WriteFile(input, []byte(fasta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxonkit := filepath.Join(dir, "taxonkit_input.tsv")
+	tsv := "processid\tspecies\nP1\tAlpha\nP2\tBeta\nP3\tBeta\nP4\tBeta\nP5\tBeta\n"
+	if err := os.WriteFile(taxonkit, []byte(tsv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taxdumpDir := filepath.Join(dir, "taxdump")
+	writeSplitTaxdump(t, taxdumpDir, []string{"P1", "P2", "P3", "P4", "P5"})
+
+	strategy := DefaultStrategy()
+	strategy.MinSeenRecords = 1
+	strategy.MinSeenBarcodes = 1
+	outDir := filepath.Join(dir, "libraries")
+	if err := SplitOne(Config{
+		Input:         input,
+		OutDir:        outDir,
+		TaxonkitInput: taxonkit,
+		Classifiers:   []string{"blast"},
+		TaxdumpDir:    taxdumpDir,
+		RunQC:         true,
+		Strategy:      strategy,
+		QC: qc.Config{
+			GapPolicy:  qc.GapPolicyDrop,
+			DedupeSeqs: true,
+			DedupeIDs:  true,
+		},
+	}); err != nil {
+		t.Fatalf("SplitOne: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "split_report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report splitReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Stats.ConflictGroups != 1 {
+		t.Fatalf("shared barcode kept by QC under a duplicate ID must conflict: %+v", report.Stats)
+	}
+	pretrain, err := os.ReadFile(filepath.Join(outDir, bucketPretrain+".fasta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pretrain), ">P1") {
+		t.Fatalf("expected surviving P1 moved to pretrain, got:\n%s", pretrain)
+	}
+	for _, bucket := range []string{bucketSeenTrain, bucketSeenVal, bucketSeenTest} {
+		data, err := os.ReadFile(filepath.Join(outDir, bucket+".fasta"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), ">P1") {
+			t.Errorf("conflicted P1 leaked into %s", bucket)
+		}
 	}
 }
 
